@@ -2,10 +2,12 @@ import numpy as np
 from scipy.signal import remez
 from tx_equalizer_design import TxEqzDesByChirp
 from enum import Enum, auto
-from pow_amp_non_lin import PowAmpNonLinRapp
+from pow_amp_non_lin_rapp import PowAmpNonLinRapp
+from pow_amp_non_lin_lut import PowAmpNonLinLut
+from pow_amp_non_lin_common import PowAmpNonLinCommon
 
 class PowAmpMode(Enum):
-    Linear, NonLinRapp = auto(), auto()    
+    Linear, NonLinRapp, NonLinLut = auto(), auto(), auto()    
 
 class NonLinEffectSimulator():
     def __init__(self, n_rf_path, rf_path_p_to_p_diff_en):
@@ -21,24 +23,32 @@ class NonLinEffectSimulator():
             self.rf_path_imp_resp_list.append(filter_imp_resp / sum(filter_imp_resp))
         self.tx_eqz_des_by_chirp = TxEqzDesByChirp()
         self.pow_amp_non_lin_rapp = PowAmpNonLinRapp()
-        self.pa_in_volt_peak = self.pow_amp_non_lin_rapp.power_dbm_to_voltage_peak(6.88)
+        self.pow_amp_non_lin_lut = PowAmpNonLinLut()
+        self.pow_amp_non_lin_common = PowAmpNonLinCommon()
+        # self.pa_in_volt_peak = self.pow_amp_non_lin_common.power_dbm_to_voltage_peak(6.88)
+        self.cpx_gain = self.gen_cpx_gain()
 
-    def apply_one_path(self, signal, pow_amp_mode, rf_path_imp_resp):
-        rf_model_out = np.convolve(signal, rf_path_imp_resp, mode='same')*self.pa_in_volt_peak
+    def apply_one_path(self, signal, pow_amp_mode, rf_path_imp_resp, cpx_gain):
+        rf_model_out = np.convolve(signal, rf_path_imp_resp, mode='same') * cpx_gain
         if pow_amp_mode == PowAmpMode.Linear:
             return rf_model_out * self.pow_amp_non_lin_rapp.gain
         elif pow_amp_mode == PowAmpMode.NonLinRapp:
             pow_amp_out = []
             for r in rf_model_out:
                 pow_amp_out.append(self.pow_amp_non_lin_rapp.apply(r))
-            return np.array(pow_amp_out)            
+            return np.array(pow_amp_out)
+        elif pow_amp_mode == PowAmpMode.NonLinLut:
+            pow_amp_out = []
+            for r in rf_model_out:
+                pow_amp_out.append(self.pow_amp_non_lin_lut.apply(r))
+            return np.array(pow_amp_out)
         else:
             print("pow_amp_mode is not supported!")
 
     def apply_channel(self, signal, pow_amp_mode):
-        output = self.apply_one_path(signal, pow_amp_mode, self.rf_path_imp_resp_list[0])
+        output = self.apply_one_path(signal, pow_amp_mode, self.rf_path_imp_resp_list[0], self.cpx_gain[0])
         for i in range(1, self.n_rf_path):
-            output += self.apply_one_path(signal, pow_amp_mode, self.rf_path_imp_resp_list[i])
+            output += self.apply_one_path(signal, pow_amp_mode, self.rf_path_imp_resp_list[i], self.cpx_gain[i])
         return output
     
     def find_perf_metric(self, signal):
@@ -46,3 +56,13 @@ class NonLinEffectSimulator():
         pslr_db = self.tx_eqz_des_by_chirp.find_pslr_db(mf_out)
         irw_m = self.tx_eqz_des_by_chirp.find_irw_m(mf_out)
         return pslr_db, irw_m
+
+    def gen_cpx_gain(self):
+        gain_var_db = np.random.uniform(low=-0.5, high=0.5, size=self.n_rf_path)
+        gain_lin = []
+        for g in gain_var_db:
+            gain_lin.append(self.pow_amp_non_lin_common.power_dbm_to_voltage_peak(6.88 + g))
+        phase_deg = np.random.uniform(low=-10.0, high=10.0, size=self.n_rf_path)
+        return np.array(gain_lin) * np.exp(1j * (phase_deg / 180 * np.pi))
+        
+

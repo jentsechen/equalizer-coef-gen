@@ -25,8 +25,10 @@ def sim_part_to_part_diff():
 
 if __name__ == "__main__":
     non_lin_effect_sim = NonLinEffectSimulator(n_rf_path=40, rf_path_p_to_p_diff_en=True)
+    # distorted_signal = non_lin_effect_sim.apply_channel(signal=non_lin_effect_sim.tx_eqz_des_by_chirp.desired_signal,
+    #                                                     pow_amp_mode=PowAmpMode.NonLinRapp)
     distorted_signal = non_lin_effect_sim.apply_channel(signal=non_lin_effect_sim.tx_eqz_des_by_chirp.desired_signal,
-                                                        pow_amp_mode=PowAmpMode.NonLinRapp)
+                                                        pow_amp_mode=PowAmpMode.NonLinLut)
     # distorted_signal = non_lin_effect_sim.apply_channel(signal=non_lin_effect_sim.tx_eqz_des_by_chirp.desired_signal,
     #                                                     pow_amp_mode=PowAmpMode.Linear)
     print(non_lin_effect_sim.find_perf_metric(non_lin_effect_sim.tx_eqz_des_by_chirp.desired_signal))
@@ -47,17 +49,17 @@ if __name__ == "__main__":
     # )
     # figure.write_html("measure_result.html")
 
-    # figure = make_subplots(rows=2, cols=1)
-    # figure.add_trace(go.Scatter(y=distorted_signal.real, line=dict(width=2)), row=1, col=1)
-    # figure.add_trace(go.Scatter(y=distorted_signal.imag, line=dict(width=2)), row=2, col=1)
-    # figure.update_layout(
-    #     xaxis=dict(title="sample"),       
-    #     yaxis=dict(title="amplitude (real part)"),
-    #     xaxis2=dict(title="sample"),      
-    #     yaxis2=dict(title="amplitude (imaginary part)"),
-    #     font=dict(size=20)
-    # )
-    # figure.write_html("simulation_result.html")
+    figure = make_subplots(rows=2, cols=1)
+    figure.add_trace(go.Scatter(y=distorted_signal.real, line=dict(width=2)), row=1, col=1)
+    figure.add_trace(go.Scatter(y=distorted_signal.imag, line=dict(width=2)), row=2, col=1)
+    figure.update_layout(
+        xaxis=dict(title="sample"),       
+        yaxis=dict(title="amplitude (real part)"),
+        xaxis2=dict(title="sample"),      
+        yaxis2=dict(title="amplitude (imaginary part)"),
+        font=dict(size=20)
+    )
+    figure.write_html("simulation_result.html")
 
     figure = make_subplots(rows=1, cols=1)
     for i in range(non_lin_effect_sim.n_rf_path):

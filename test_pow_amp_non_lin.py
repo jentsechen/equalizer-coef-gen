@@ -1,7 +1,7 @@
 import numpy as np
 import plotly.graph_objs as go
 from plotly.subplots import make_subplots
-from pow_amp_non_lin import PowAmpNonLinRapp
+from pow_amp_non_lin_rapp import PowAmpNonLinRapp
 
 if __name__ == "__main__":
     pow_amp_non_lin_poly = PowAmpNonLinRapp()
