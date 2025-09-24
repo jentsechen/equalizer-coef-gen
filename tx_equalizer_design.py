@@ -23,23 +23,25 @@ class TxEqualizerDesign():
         resmp_data = self.__resample(meas_data)
         start_idx = self.__find_start_idx(resmp_data)
         return resmp_data[start_idx:(start_idx+len(self.desired_signal))]
-    
-    def train_coef(self, unwanted_signal, n_tap, eps=0.0):
-        n_group = min(len(unwanted_signal), len(self.desired_signal)) - (n_tap - 1)
 
-        R = np.zeros((n_tap, n_tap), dtype=complex)
-        p = np.zeros(n_tap, dtype=complex)
+    def train_coef(self, unwanted_signal, n_taps, desired_signal=None, eps=0.0):
+        if desired_signal is None:
+            desired_signal = self.desired_signal
+        n_group = min(len(unwanted_signal), len(desired_signal)) - (n_taps - 1)
+
+        R = np.zeros((n_taps, n_taps), dtype=complex)
+        p = np.zeros(n_taps, dtype=complex)
         for g in range(n_group):
             idx_sta = g
-            idx_end = idx_sta + n_tap
+            idx_end = idx_sta + n_taps
             u = unwanted_signal[idx_sta:idx_end][::-1]        
-            d = self.desired_signal[idx_sta + (n_tap - 1)]      
+            d = desired_signal[idx_sta + (n_taps - 1)]      
 
             R += np.outer(u, np.conj(u))             
             p += u * np.conj(d)                      
 
         if eps > 0:
-            R = R + eps * np.eye(n_tap)
+            R = R + eps * np.eye(n_taps)
 
         w = np.linalg.solve(R, p)
         return w / sum(w)
@@ -50,13 +52,18 @@ class TxEqualizerDesign():
         else:
             train_data = self.proc_meas_to_train(meas_data)
         coef = self.train_coef(train_data, n_taps)
-        eqz_out = np.convolve(train_data, coef.conjugate(), mode='full')[0:len(self.desired_signal)]
-        eqz_out_fix = []
-        for i in range(len(eqz_out)):
-            re = self.qntz_format.apply(eqz_out[i].real)
-            im = self.qntz_format.apply(eqz_out[i].imag)
-            eqz_out_fix.append(re + 1j * im)
-        return np.array(eqz_out_fix)
+        eqz_out = np.convolve(self.desired_signal, coef.conjugate(), mode='full')[0:len(self.desired_signal)]
+        # eqz_dly = int((n_taps-1)/2)
+        # eqz_out = np.convolve(train_data, coef.conjugate())[eqz_dly:len(self.desired_signal)+eqz_dly]
+        if sim_en == True:
+            return eqz_out
+        else:
+            eqz_out_fix = []
+            for i in range(len(eqz_out)):
+                re = self.qntz_format.apply(eqz_out[i].real)
+                im = self.qntz_format.apply(eqz_out[i].imag)
+                eqz_out_fix.append(re + 1j * im)
+            return np.array(eqz_out_fix)
     
     def gen_mf_out(self, data):
         mf_out = np.convolve(data, np.conj(self.desired_signal))

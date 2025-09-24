@@ -5,13 +5,13 @@ from enum import Enum, auto
 from pow_amp_non_lin_rapp import PowAmpNonLinRapp
 from pow_amp_non_lin_lut import PowAmpNonLinLut
 from pow_amp_non_lin_common import PowAmpNonLinCommon
-from scipy.signal import butter, lfilter, cheby1
+from scipy.signal import lfilter, cheby1
 
 class PowAmpMode(Enum):
     Linear, NonLinRapp, NonLinLut = auto(), auto(), auto()    
 
 class NonLinEffectSimulator():
-    def __init__(self, n_rf_path, rf_path_p_to_p_diff_en):
+    def __init__(self, n_rf_path, rf_path_p_to_p_diff_en, rand_cpx_gain_en):
         cutoff = 650/1250/2
         self.n_rf_path = n_rf_path
         self.rf_path_imp_resp_list = []
@@ -31,7 +31,7 @@ class NonLinEffectSimulator():
         self.pow_amp_non_lin_rapp = PowAmpNonLinRapp()
         self.pow_amp_non_lin_lut = PowAmpNonLinLut()
         self.pow_amp_non_lin_common = PowAmpNonLinCommon()
-        self.cpx_gain = self.gen_cpx_gain()
+        self.cpx_gain = self.gen_cpx_gain(rand_cpx_gain_en)
 
     def apply_one_path(self, signal, pow_amp_mode, rf_path_imp_resp, cpx_gain, b, a):
         # rf_model_out = np.convolve(signal, rf_path_imp_resp, mode='same') * cpx_gain
@@ -63,13 +63,15 @@ class NonLinEffectSimulator():
         irw_m = self.tx_eqz_des_by_chirp.find_irw_m(mf_out)
         return pslr_db, irw_m
 
-    def gen_cpx_gain(self):
-        gain_var_db = np.random.uniform(low=-0.5, high=0.5, size=self.n_rf_path)
-        gain_lin = []
-        for g in gain_var_db:
-            gain_lin.append(self.pow_amp_non_lin_common.power_dbm_to_voltage_peak(6.88 + g))
-        phase_deg = np.random.uniform(low=-10.0, high=10.0, size=self.n_rf_path)
-        return np.array(gain_lin) * np.exp(1j * (phase_deg / 180 * np.pi))
-        # return np.ones(self.n_rf_path) * self.pow_amp_non_lin_common.power_dbm_to_voltage_peak(6.88)
+    def gen_cpx_gain(self, rand_cpx_gain_en):
+        if rand_cpx_gain_en == True:
+            gain_var_db = np.random.uniform(low=-0.5, high=0.5, size=self.n_rf_path)
+            gain_lin = []
+            for g in gain_var_db:
+                gain_lin.append(self.pow_amp_non_lin_common.power_dbm_to_voltage_peak(6.88 + g))
+            phase_deg = np.random.uniform(low=-10.0, high=10.0, size=self.n_rf_path)
+            return np.array(gain_lin) * np.exp(1j * (phase_deg / 180 * np.pi))
+        else:
+            return np.ones(self.n_rf_path) * self.pow_amp_non_lin_common.power_dbm_to_voltage_peak(6.88)
         
 
