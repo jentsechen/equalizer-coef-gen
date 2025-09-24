@@ -2,7 +2,7 @@ import numpy as np
 from pow_amp_non_lin_common import PowAmpNonLinCommon
 
 class PowAmpNonLinRapp(PowAmpNonLinCommon):
-    def __init__(self, gain_db = 38.5, op1db_dbm = 22.1, p_sat_dbm = 34):
+    def __init__(self, gain_db = 35, op1db_dbm = 22.1, p_sat_dbm = 34):
         self.gain_db = gain_db
         self.op1db_dbm = op1db_dbm
         self.p_sat_dbm = p_sat_dbm

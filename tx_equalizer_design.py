@@ -44,8 +44,11 @@ class TxEqualizerDesign():
         w = np.linalg.solve(R, p)
         return w / sum(w)
     
-    def gen_eqz_out(self, meas_data, n_taps):
-        train_data = self.proc_meas_to_train(meas_data)
+    def gen_eqz_out(self, meas_data, n_taps, sim_en=False):
+        if sim_en == True:
+            train_data = meas_data
+        else:
+            train_data = self.proc_meas_to_train(meas_data)
         coef = self.train_coef(train_data, n_taps)
         eqz_out = np.convolve(train_data, coef.conjugate(), mode='full')[0:len(self.desired_signal)]
         eqz_out_fix = []

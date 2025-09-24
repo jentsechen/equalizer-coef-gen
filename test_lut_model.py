@@ -21,26 +21,41 @@ if __name__ == "__main__":
     out_pow_dbm_non_lin = np.array(out_pow_dbm_non_lin)
     out_phase_rad = np.array(out_phase_rad)
 
-    figure = make_subplots(rows=2, cols=1)
+    gain_db, op1db_dbm, p_sat_dbm = 35, 22.1, 34
+
+    figure = make_subplots(rows=1, cols=1)
+    figure.add_trace(go.Scatter(
+        x=in_pow_dbm, 
+        y=in_pow_dbm+gain_db, 
+        line=dict(width=2),
+        name="linear"), row=1, col=1)
     figure.add_trace(go.Scatter(
         x=in_pow_dbm, 
         y=out_pow_dbm_non_lin, 
-        line=dict(color="blue", width=2),
-        name=""), row=1, col=1)
+        line=dict(width=2),
+        name="non-linear"), row=1, col=1)
+    figure.add_hline(y=p_sat_dbm, line_dash="dash", annotation_text="Psat")
+    figure.add_hline(y=op1db_dbm, line_dash="dash", annotation_text="OP1dB")
+    figure.add_hline(y=op1db_dbm+1, line_dash="dash", annotation_text="OP1dB+1dB")
+    figure.add_vline(x=-11.8, line_dash="dash", annotation_text="IP1dB")
+    figure.update_layout(
+        xaxis_title="Input Power (dBm)",
+        yaxis_title="Output Power (dBm)",
+        font=dict(size=30)
+    )
+    figure.write_html("lut_model_amam.html")
+
+    figure = make_subplots(rows=1, cols=1)
     figure.add_trace(go.Scatter(
         x=in_pow_dbm, 
         y=out_phase_rad, 
-        line=dict(color="blue", width=2),
-        name=""), row=2, col=1)
-    # figure.add_hline(y=pow_amp_non_lin_poly.p_sat_dbm, line_dash="dash", annotation_text="Psat")
-    # figure.add_hline(y=pow_amp_non_lin_poly.op1db_dbm, line_dash="dash", annotation_text="OP1dB")
-    # figure.add_hline(y=pow_amp_non_lin_poly.op1db_dbm+1, line_dash="dash", annotation_text="OP1dB+1dB")
-    # figure.add_vline(x=in_pow_dbm[idx], line_dash="dash", annotation_text="IP1dB")
-    # figure.update_layout(
-    #     xaxis_title="Input Power (dBm)",
-    #     yaxis_title="Output Power (dBm)",
-    #     font=dict(size=30)
-    # )
-    figure.write_html("amam_ampm.html")
+        line=dict(width=2),
+        name=""), row=1, col=1)
+    figure.update_layout(
+        xaxis_title="Input Power (dBm)",
+        yaxis_title="Phase (degree)",
+        font=dict(size=30)
+    )
+    figure.write_html("lut_model_ampm.html")
 
     print("DONE")
