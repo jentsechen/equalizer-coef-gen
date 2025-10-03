@@ -10,6 +10,7 @@ from scipy.signal import resample_poly
 from scipy.signal import remez, freqz
 from non_lin_effect_simulator import NonLinEffectSimulator, PowAmpMode
 from scipy.signal import butter, lfilter, freqz, cheby1
+import padasip as pa
 
 def sim_part_to_part_diff():
     n_test = 100
@@ -47,35 +48,87 @@ if __name__ == "__main__":
     # pow_amp_mode = PowAmpMode.Linear
     tx_eqz_des = non_lin_effect_sim.tx_eqz_des_by_chirp
     desired_signal = tx_eqz_des.desired_signal
-    distorted_signal_0 = non_lin_effect_sim.apply_channel(signal=desired_signal, pow_amp_mode=pow_amp_mode)
-
-    coef_0 = tx_eqz_des.train_coef(unwanted_signal=distorted_signal_0, n_taps=n_taps)
-    eqz_out_0 = np.convolve(desired_signal, coef_0.conjugate(), mode='full')[0:len(desired_signal)]
-    distorted_signal_1 = non_lin_effect_sim.apply_channel(signal=eqz_out_0, pow_amp_mode=pow_amp_mode)
-
-    coef_1 = tx_eqz_des.train_coef(unwanted_signal=distorted_signal_1, n_taps=n_taps, desired_signal=eqz_out_0)
-    eqz_out_1 = np.convolve(desired_signal, coef_1.conjugate(), mode='full')[0:len(desired_signal)]
-    distorted_signal_2 = non_lin_effect_sim.apply_channel(signal=eqz_out_1, pow_amp_mode=pow_amp_mode)
-
-    coef_2 = tx_eqz_des.train_coef(unwanted_signal=distorted_signal_2, n_taps=n_taps, desired_signal=eqz_out_1)
-    eqz_out_2 = np.convolve(desired_signal, coef_2.conjugate(), mode='full')[0:len(desired_signal)]
-    distorted_signal_3 = non_lin_effect_sim.apply_channel(signal=eqz_out_2, pow_amp_mode=pow_amp_mode)
-
-    coef_3 = tx_eqz_des.train_coef(unwanted_signal=distorted_signal_3, n_taps=n_taps, desired_signal=eqz_out_2)
-    eqz_out_3 = np.convolve(desired_signal, coef_3.conjugate(), mode='full')[0:len(desired_signal)]
-    distorted_signal_4 = non_lin_effect_sim.apply_channel(signal=eqz_out_3, pow_amp_mode=pow_amp_mode)
-
-    coef_4 = tx_eqz_des.train_coef(unwanted_signal=distorted_signal_4, n_taps=n_taps, desired_signal=eqz_out_3)
-    eqz_out_4 = np.convolve(desired_signal, coef_4.conjugate(), mode='full')[0:len(desired_signal)]
-    distorted_signal_5 = non_lin_effect_sim.apply_channel(signal=eqz_out_4, pow_amp_mode=pow_amp_mode)
 
     print(non_lin_effect_sim.find_perf_metric(desired_signal))
-    print(non_lin_effect_sim.find_perf_metric(distorted_signal_0))
-    print(non_lin_effect_sim.find_perf_metric(distorted_signal_1))
-    print(non_lin_effect_sim.find_perf_metric(distorted_signal_2))
-    print(non_lin_effect_sim.find_perf_metric(distorted_signal_3))
-    print(non_lin_effect_sim.find_perf_metric(distorted_signal_4))
-    print(non_lin_effect_sim.find_perf_metric(distorted_signal_5))
+
+    # print("method 1")
+    # distorted_signal = non_lin_effect_sim.apply_channel(signal=desired_signal, pow_amp_mode=pow_amp_mode)
+    # print(non_lin_effect_sim.find_perf_metric(distorted_signal))
+    # eqz_out = desired_signal
+    # coef_hist_method_1 = []
+    # for i in range(10):
+    #     coef = tx_eqz_des.train_coef(unwanted_signal=distorted_signal, n_taps=n_taps, desired_signal=eqz_out)
+    #     eqz_out = np.convolve(desired_signal, coef.conjugate(), mode='full')[0:len(desired_signal)]
+    #     distorted_signal = non_lin_effect_sim.apply_channel(signal=eqz_out, pow_amp_mode=pow_amp_mode)
+    #     print(non_lin_effect_sim.find_perf_metric(distorted_signal))
+    #     coef_hist_method_1.append(coef)
+
+    print("method 2")
+    mu = 0.05
+    distorted_signal = non_lin_effect_sim.apply_channel(signal=desired_signal, pow_amp_mode=pow_amp_mode)
+    print(non_lin_effect_sim.find_perf_metric(distorted_signal))
+    coef = tx_eqz_des.train_coef(unwanted_signal=distorted_signal, n_taps=n_taps)
+    # coef = np.zeros(n_taps)+1j*np.zeros(n_taps)
+    # coef[0] = 1
+    # coef /= np.linalg.norm(coef)
+    coef_hist, dis_sig_hist = [], []
+    ref_norm = 0
+    for iter in range(10):
+        distorted_signal_pad = np.pad(distorted_signal, (n_taps, 0))
+        coef_tmp = np.zeros(n_taps)+1j*np.zeros(n_taps)
+        for i in range(4100):
+            error = np.conj(desired_signal[i]) - np.vdot(distorted_signal_pad[i:(i+n_taps)], coef)
+            coef_tmp += (error*distorted_signal_pad[i:(i+n_taps)])
+        coef += (mu*coef_tmp/np.linalg.norm(coef_tmp))
+        coef_hist.append(coef)
+        eqz_out = np.convolve(desired_signal, coef, mode='full')[0:len(desired_signal)]
+        distorted_signal = non_lin_effect_sim.apply_channel(signal=eqz_out, pow_amp_mode=pow_amp_mode)
+        dis_sig_hist.append(distorted_signal)
+        if iter==0:
+            ref_norm = np.linalg.norm(distorted_signal-desired_signal)
+        print(non_lin_effect_sim.find_perf_metric(distorted_signal), np.linalg.norm(distorted_signal-desired_signal)/ref_norm)
+
+    # coef_hist, dis_sig_hist = [], []
+    # for iter in range(10):
+    #     coef_tmp = np.zeros(n_taps)+1j*np.zeros(n_taps)
+    #     for i in range(4100):
+    #         error = desired_signal[i] - distorted_signal[i]
+    #         if i+n_taps>4100:
+    #             # des = np.concatenate([desired_signal[i::], np.zeros(i+n_taps-4100)])
+    #             des = np.pad(desired_signal[i::], (i+n_taps-4100, 0))
+    #         else:
+    #             des = desired_signal[i:(i+n_taps)]
+    #         # coef_tmp += e_n * np.conj(x_n)
+    #         # coef_tmp += (mu*error*np.conj(des))
+    #         coef_tmp += (error*np.conj(des))
+    #     # coef += coef_tmp/sum(coef_tmp)
+    #     coef += (mu*coef_tmp/sum(coef_tmp))
+    #     coef_hist.append(coef)
+    #     eqz_out = np.convolve(desired_signal, coef, mode='full')[0:len(desired_signal)]
+    #     distorted_signal = non_lin_effect_sim.apply_channel(signal=eqz_out, pow_amp_mode=pow_amp_mode)
+    #     dis_sig_hist.append(distorted_signal)
+    #     print(non_lin_effect_sim.find_perf_metric(distorted_signal))
+
+    # print("distorted signal")
+    # distorted_signal = non_lin_effect_sim.apply_channel(signal=desired_signal, pow_amp_mode=pow_amp_mode)
+    # figure = make_subplots(rows=2, cols=1)
+    # figure.add_trace(go.Scatter(y=desired_signal.real), row=1, col=1)
+    # figure.add_trace(go.Scatter(y=desired_signal.imag), row=2, col=1)
+    # figure.add_trace(go.Scatter(y=distorted_signal.real / 645), row=1, col=1)
+    # figure.add_trace(go.Scatter(y=distorted_signal.imag / 645), row=2, col=1)
+    # for i in range(int(len(dis_sig_hist)/3)):
+    #     figure.add_trace(go.Scatter(y=dis_sig_hist[i*3].real / 645), row=1, col=1)
+    #     figure.add_trace(go.Scatter(y=dis_sig_hist[i*3].imag / 645), row=2, col=1)
+    # figure.write_html("dis_sig.html")
+
+    data = {"d": {}, "v0": {}, "v1": {}, "v5": {}, "v9": {}}
+    data["d"] = {"re": desired_signal.real.tolist(), "im": desired_signal.imag.tolist()}
+    data["v0"] = {"re": (distorted_signal.real/645).tolist(), "im": (distorted_signal.imag/645).tolist()}
+    data["v1"] = {"re": (dis_sig_hist[0].real/645).tolist(), "im": (dis_sig_hist[0].imag/645).tolist()}
+    data["v5"] = {"re": (dis_sig_hist[4].real/645).tolist(), "im": (dis_sig_hist[4].imag/645).tolist()}
+    data["v9"] = {"re": (dis_sig_hist[8].real/645).tolist(), "im": (dis_sig_hist[8].imag/645).tolist()}
+    with open("sim_result.json", "w", encoding="UTF-8") as f:
+        json.dump(data, f)
 
     # mf_out = non_lin_effect_sim.tx_eqz_des_by_chirp.gen_mf_out(distorted_signal)
     # figure = make_subplots(rows=1, cols=1)

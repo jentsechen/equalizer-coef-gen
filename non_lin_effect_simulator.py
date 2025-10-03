@@ -65,7 +65,7 @@ class NonLinEffectSimulator():
 
     def gen_cpx_gain(self, rand_cpx_gain_en):
         if rand_cpx_gain_en == True:
-            gain_var_db = np.random.uniform(low=-0.5, high=0.5, size=self.n_rf_path)
+            gain_var_db = np.random.uniform(low=-1.5, high=1.5, size=self.n_rf_path)
             gain_lin = []
             for g in gain_var_db:
                 gain_lin.append(self.pow_amp_non_lin_common.power_dbm_to_voltage_peak(6.88 + g))
@@ -73,5 +73,5 @@ class NonLinEffectSimulator():
             return np.array(gain_lin) * np.exp(1j * (phase_deg / 180 * np.pi))
         else:
             return np.ones(self.n_rf_path) * self.pow_amp_non_lin_common.power_dbm_to_voltage_peak(6.88)
-        
+
 
