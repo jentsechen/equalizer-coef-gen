@@ -4,7 +4,7 @@ from pow_amp_non_lin_common import PowAmpNonLinCommon
 
 class PowAmpNonLinLut(PowAmpNonLinCommon):
     def __init__(self):
-        with open("lut_amam_ampm.json", "r", encoding="UTF-8") as f:
+        with open("./model/lut_amam_ampm.json", "r", encoding="UTF-8") as f:
             lut = json.load(f)
         self.input_volt_peak = self.power_dbm_to_voltage_peak(np.array(lut["p_in"]))
         self.output_volt_peak = self.power_dbm_to_voltage_peak(np.array(lut["am_am"]))
