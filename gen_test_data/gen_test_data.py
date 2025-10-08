@@ -46,8 +46,8 @@ def pad_zero(data):
 def save_bin_data(data, file_name):
     data_zp = pad_zero(data)
     interleaved = np.empty(2 * len(data_zp), dtype=np.float32)
-    interleaved[0::2] = data_zp.imag
-    interleaved[1::2] = data_zp.real
+    interleaved[1::2] = data_zp.imag
+    interleaved[0::2] = data_zp.real
     qntz_data = np.clip(np.round(interleaved * 2**14), -32768, 32767).astype(np.int16)
     with open("./{}.bin".format(file_name), "wb") as f:
         qntz_data.tofile(f)
@@ -60,8 +60,10 @@ def load_bin_data(file_name):
     for i in range(int(n_bytes/32)):
         for j in range(5):
             s = i*32 + j*4
-            re = float(struct.unpack("h", data[(s+2):(s+4)])[0])
-            im = float(struct.unpack("h", data[s:(s+2)])[0])
+            # re = float(struct.unpack("h", data[(s+2):(s+4)])[0])
+            # im = float(struct.unpack("h", data[s:(s+2)])[0])
+            re = float(struct.unpack("h", data[s:(s+2)])[0])
+            im = float(struct.unpack("h", data[(s+2):(s+4)])[0])
             decode_data.append((re + 1j*im)/2**14)
     return np.array(decode_data)
 
@@ -72,16 +74,14 @@ def save_coef(coef):
 if __name__ == "__main__":
     ind_data = read_data("ind", True)
     out_data = read_data("out", True)
-    print(len(ind_data), len(out_data))
     coef = read_coef()
-    print(coef)
 
     save_bin_data(ind_data, "stimulus")
     save_bin_data(out_data, "capture_memory")
     save_coef(coef)
     ind_data_r = load_bin_data("stimulus")
     out_data_r = load_bin_data("capture_memory")
-    
+
     figure = make_subplots(rows=2, cols=1)
     figure.add_trace(go.Scatter(y=ind_data.real), row=1, col=1)
     figure.add_trace(go.Scatter(y=ind_data.imag), row=2, col=1)
@@ -92,6 +92,12 @@ if __name__ == "__main__":
     figure.add_trace(go.Scatter(y=out_data_r.real), row=1, col=1)
     figure.add_trace(go.Scatter(y=out_data_r.imag), row=2, col=1)
     figure.write_html("./result.html")
+
+    figure = make_subplots(rows=2, cols=1)
+    calc_golden = np.convolve(ind_data, coef)
+    figure.add_trace(go.Scatter(y=calc_golden.real), row=1, col=1)
+    figure.add_trace(go.Scatter(y=calc_golden.imag), row=2, col=1)
+    figure.write_html("./calc_golden.html")
 
     print("DONE")
 

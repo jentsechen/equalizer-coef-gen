@@ -5,7 +5,7 @@
     * `python3 test_non_lin_effect_simulator.py`
 * Generate test data to verify digital IP and firmware control on FPGA
     * `cd gen_test_data`
-    * `python3 gen_test_data`
+    * `python3 gen_test_data.py`
 ## LUT Non-Linear Model
 ![](./figure/am_am.png)
 ![](./figure/am_pm.png)

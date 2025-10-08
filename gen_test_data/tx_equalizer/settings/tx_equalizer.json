@@ -264,8 +264,8 @@
                     },
                     "fix": {
                         "en": true,
-                        "frac_bit": 15,
-                        "int_bit": 0,
+                        "frac_bit": 14,
+                        "int_bit": 1,
                         "lsb": "Trun",
                         "msb": "Wrap",
                         "sign": "Signed"
@@ -405,8 +405,8 @@
                     },
                     "fix": {
                         "en": true,
-                        "frac_bit": 15,
-                        "int_bit": 0,
+                        "frac_bit": 14,
+                        "int_bit": 1,
                         "lsb": "Trun",
                         "msb": "Wrap",
                         "sign": "Signed"
@@ -593,8 +593,8 @@
                     },
                     "fix": {
                         "en": true,
-                        "frac_bit": 15,
-                        "int_bit": 0,
+                        "frac_bit": 14,
+                        "int_bit": 1,
                         "lsb": "Trun",
                         "msb": "Wrap",
                         "sign": "Signed"
@@ -928,8 +928,8 @@
                     },
                     "fix": {
                         "en": true,
-                        "frac_bit": 15,
-                        "int_bit": 0,
+                        "frac_bit": 14,
+                        "int_bit": 1,
                         "lsb": "Trun",
                         "msb": "Wrap",
                         "sign": "Signed"
@@ -1069,8 +1069,8 @@
                     },
                     "fix": {
                         "en": true,
-                        "frac_bit": 15,
-                        "int_bit": 0,
+                        "frac_bit": 14,
+                        "int_bit": 1,
                         "lsb": "Trun",
                         "msb": "Wrap",
                         "sign": "Signed"
@@ -1257,8 +1257,8 @@
                     },
                     "fix": {
                         "en": true,
-                        "frac_bit": 15,
-                        "int_bit": 0,
+                        "frac_bit": 14,
+                        "int_bit": 1,
                         "lsb": "Trun",
                         "msb": "Wrap",
                         "sign": "Signed"
@@ -1592,8 +1592,8 @@
                     },
                     "fix": {
                         "en": true,
-                        "frac_bit": 15,
-                        "int_bit": 0,
+                        "frac_bit": 14,
+                        "int_bit": 1,
                         "lsb": "Trun",
                         "msb": "Wrap",
                         "sign": "Signed"
@@ -1733,8 +1733,8 @@
                     },
                     "fix": {
                         "en": true,
-                        "frac_bit": 15,
-                        "int_bit": 0,
+                        "frac_bit": 14,
+                        "int_bit": 1,
                         "lsb": "Trun",
                         "msb": "Wrap",
                         "sign": "Signed"
@@ -1921,8 +1921,8 @@
                     },
                     "fix": {
                         "en": true,
-                        "frac_bit": 15,
-                        "int_bit": 0,
+                        "frac_bit": 14,
+                        "int_bit": 1,
                         "lsb": "Trun",
                         "msb": "Wrap",
                         "sign": "Signed"
@@ -2256,8 +2256,8 @@
                     },
                     "fix": {
                         "en": true,
-                        "frac_bit": 15,
-                        "int_bit": 0,
+                        "frac_bit": 14,
+                        "int_bit": 1,
                         "lsb": "Trun",
                         "msb": "Wrap",
                         "sign": "Signed"
@@ -2397,8 +2397,8 @@
                     },
                     "fix": {
                         "en": true,
-                        "frac_bit": 15,
-                        "int_bit": 0,
+                        "frac_bit": 14,
+                        "int_bit": 1,
                         "lsb": "Trun",
                         "msb": "Wrap",
                         "sign": "Signed"
@@ -2585,8 +2585,8 @@
                     },
                     "fix": {
                         "en": true,
-                        "frac_bit": 15,
-                        "int_bit": 0,
+                        "frac_bit": 14,
+                        "int_bit": 1,
                         "lsb": "Trun",
                         "msb": "Wrap",
                         "sign": "Signed"
@@ -2804,6 +2804,100 @@
                 "prim": 0
             },
             "stype": "b",
+            "su": {
+                "is_unit": false,
+                "scaling": 0.0
+            }
+        },
+        "iv.mult_out_data_im": {
+            "delay": {
+                "delay": 0
+            },
+            "dim": {
+                "col": 5,
+                "dim": 1,
+                "len": 5,
+                "row": 1
+            },
+            "file": {
+                "en": true
+            },
+            "fix": {
+                "en": true,
+                "frac_bit": 14,
+                "int_bit": 2,
+                "lsb": "Trun",
+                "msb": "Wrap",
+                "sign": "Signed"
+            },
+            "name": {
+                "module": "tx_equalizer",
+                "node": "iv.mult_out_data_im"
+            },
+            "qme": {
+                "low_bound": 0,
+                "up_bound": 0
+            },
+            "sbind": {
+                "fxp_force": false,
+                "reset_flag": true
+            },
+            "se": {
+                "enums": null,
+                "is_enum": false,
+                "name": ""
+            },
+            "sgf": {
+                "prim": 0
+            },
+            "stype": "d",
+            "su": {
+                "is_unit": false,
+                "scaling": 0.0
+            }
+        },
+        "iv.mult_out_data_re": {
+            "delay": {
+                "delay": 0
+            },
+            "dim": {
+                "col": 5,
+                "dim": 1,
+                "len": 5,
+                "row": 1
+            },
+            "file": {
+                "en": true
+            },
+            "fix": {
+                "en": true,
+                "frac_bit": 14,
+                "int_bit": 2,
+                "lsb": "Trun",
+                "msb": "Wrap",
+                "sign": "Signed"
+            },
+            "name": {
+                "module": "tx_equalizer",
+                "node": "iv.mult_out_data_re"
+            },
+            "qme": {
+                "low_bound": 0,
+                "up_bound": 0
+            },
+            "sbind": {
+                "fxp_force": false,
+                "reset_flag": true
+            },
+            "se": {
+                "enums": null,
+                "is_enum": false,
+                "name": ""
+            },
+            "sgf": {
+                "prim": 0
+            },
+            "stype": "d",
             "su": {
                 "is_unit": false,
                 "scaling": 0.0
