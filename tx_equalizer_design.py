@@ -109,10 +109,18 @@ class TxEqzDesByChirp(TxEqualizerDesign):
         qntz_format = qt(sign=eSign.Signed, int_bit=0, frac_bit=15, msb=eMSB.Sat, lsb=eLSB.Rnd)
         super().__init__(desired_signal, qntz_format)
 
+    # def __gen_norm_factor(self, coef):
+    #     equalized_signal = np.convolve(self.desired_signal, coef)[0:len(self.desired_signal)]
+    #     norm_factor = max(max(abs(equalized_signal.real)), max(abs(equalized_signal.imag)))
+    #     return np.ceil(norm_factor * 100) / 100
+
+    def __mag_resp(self, waveform):
+        return abs(np.fft.fftshift(np.fft.fft(waveform)))
+
     def __gen_norm_factor(self, coef):
-        equalized_signal = np.convolve(self.desired_signal, coef)[0:len(self.desired_signal)]
-        norm_factor = max(max(abs(equalized_signal.real)), max(abs(equalized_signal.imag)))
-        print(norm_factor)
+        eqz_in = self.desired_signal
+        eqz_out = np.convolve(self.desired_signal, coef)[0:len(self.desired_signal)]
+        norm_factor = max(self.__mag_resp(eqz_out)) / max(self.__mag_resp(eqz_in))
         return np.ceil(norm_factor * 100) / 100
     
     def __print_arr(self, data, name):
@@ -122,23 +130,27 @@ class TxEqzDesByChirp(TxEqualizerDesign):
         arr += (str(data[8]) + "};")
         return arr
 
-    # legacy:
-    # channel 4:
-    # int16_t impulse_coef_re_s1_14[9] = {-2028, 14481, -200, 3284, -4386, 3863, -3318, 1655, -244};
-    # int16_t impulse_coef_im_s1_14[9] = {-575, -167, 2078, -1669, -965, 1060, -806, 766, 278};
-    # channel 5:
-    # int16_t impulse_coef_re_s1_14[9] = {6, 15143, -10132, 8647, -6985, 5327, -3362, 1239, -247};
-    # int16_t impulse_coef_im_s1_14[9] = {-1192, 729, 763, 51, -1573, 2195, -1219, 372, -127};
     def gen_coef(self, file_path="./meas_sig/result/ch4_bfr_eqz.npy", print_en=False):
         signal_analyzer_output = np.load(file_path)
         unwanted_signal = self.proc_meas_to_train(signal_analyzer_output[0:4000])
-        coef = self.train_coef(unwanted_signal=unwanted_signal, n_taps=9)[::-1]
+        coef = self.train_coef(unwanted_signal=unwanted_signal, n_taps=9).conj()
         norm_factor = self.__gen_norm_factor(coef)
         coef /= norm_factor
         if print_en==True:
             print(self.__print_arr(np.array(np.round(coef.real*2**14), dtype=int), "re"))
             print(self.__print_arr(np.array(np.round(coef.imag*2**14), dtype=int), "im"))
         return coef
+    
+    def load_legacy_coef(self, ch_idx):
+        if ch_idx==4:
+            re = np.array([-2028, 14481, -200, 3284, -4386, 3863, -3318, 1655, -244])/2**14
+            im = np.array([-575, -167, 2078, -1669, -965, 1060, -806, 766, 278])/2**14
+        elif ch_idx==5:
+            re = np.array([6, 15143, -10132, 8647, -6985, 5327, -3362, 1239, -247])/2**14
+            im = np.array([-1192, 729, 763, 51, -1573, 2195, -1219, 372, -127])/2**14
+        else:
+            print("This channel is not supported")
+        return re + 1j*im
 
 class TxEqzDesByOfdm(TxEqualizerDesign):
     def __init__(self):
