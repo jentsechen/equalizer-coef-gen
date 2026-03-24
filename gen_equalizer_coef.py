@@ -57,41 +57,42 @@ if __name__ == "__main__":
     coef_ch4 = tx_eqz_des_by_chirp.gen_coef(file_path="./meas_sig/result/ch4_bfr_eqz.npy", print_en=True)
     coef_ch5 = tx_eqz_des_by_chirp.gen_coef(file_path="./meas_sig/result/ch5_bfr_eqz.npy", print_en=True)
 
-    n_sample = 20200
-    ch_idx = 4
-    time_dur = 20
-    sig_before_eqz = np.load("./meas_sig/result/ch{}_bfr_eqz_{}us.npy".format(ch_idx, time_dur))
-    sig_after_eqz = np.load("./meas_sig/result/ch{}_aft_eqz_{}us.npy".format(ch_idx, time_dur))
-    figure = make_subplots(rows=2, cols=1)
-    figure.add_trace(go.Scatter(y=sig_before_eqz.real[0:n_sample], name="not equalized, real part"), row=1, col=1)
-    figure.add_trace(go.Scatter(y=sig_before_eqz.imag[0:n_sample], name="not equalized, imaginary part"), row=2, col=1)
-    figure.add_trace(go.Scatter(y=sig_after_eqz.real[0:n_sample], name="equalized, real part"), row=1, col=1)
-    figure.add_trace(go.Scatter(y=sig_after_eqz.imag[0:n_sample], name="equalized, imaginary part"), row=2, col=1)
-    figure.update_layout(
-        xaxis=dict(title="sample"),
-        xaxis2=dict(title="sample"),
-        font=dict(size=25)
-    )
+    # n_sample = 20200
+    # ch_idx = 4
+    # time_dur = 20
+    # sig_before_eqz = np.load("./meas_sig/result/ch{}_bfr_eqz_{}us.npy".format(ch_idx, time_dur))
+    # sig_after_eqz = np.load("./meas_sig/result/ch{}_aft_eqz_{}us.npy".format(ch_idx, time_dur))
+    # figure = make_subplots(rows=2, cols=1)
+    # figure.add_trace(go.Scatter(y=sig_before_eqz.real[0:n_sample], name="not equalized, real part"), row=1, col=1)
+    # figure.add_trace(go.Scatter(y=sig_before_eqz.imag[0:n_sample], name="not equalized, imaginary part"), row=2, col=1)
+    # figure.add_trace(go.Scatter(y=sig_after_eqz.real[0:n_sample], name="equalized, real part"), row=1, col=1)
+    # figure.add_trace(go.Scatter(y=sig_after_eqz.imag[0:n_sample], name="equalized, imaginary part"), row=2, col=1)
+    # figure.update_layout(
+    #     xaxis=dict(title="sample"),
+    #     xaxis2=dict(title="sample"),
+    #     font=dict(size=25)
+    # )
     # pof.iplot(figure)
 
-    ch_idx = 5
-    signal_analyzer_output = np.load("./meas_sig/result/ch{}_bfr_eqz.npy".format(ch_idx))
-    tx_eqz_des_by_chirp = TxEqzDesByChirp()
-    unwanted_signal = tx_eqz_des_by_chirp.proc_meas_to_train(signal_analyzer_output[0:4000])
-    if ch_idx == 4:
-        coef = coef_ch4
-    if ch_idx == 5:
-        coef = coef_ch5
-    equalized_signal = np.convolve(unwanted_signal, coef)[0:len(tx_eqz_des_by_chirp.desired_signal)]
-    figure = make_subplots(rows=2, cols=1)
-    figure.add_trace(go.Scatter(y=unwanted_signal.real), row=1, col=1)
-    figure.add_trace(go.Scatter(y=unwanted_signal.imag), row=2, col=1)
-    figure.add_trace(go.Scatter(y=equalized_signal.real), row=1, col=1)
-    figure.add_trace(go.Scatter(y=equalized_signal.imag), row=2, col=1)
-    unwanted_sig_env = abs(unwanted_signal)
-    equalized_sig_env = abs(equalized_signal)
-    pof.iplot(figure)
-    print(10*np.log10(max(unwanted_sig_env) / max(equalized_sig_env)))
+    # ch_idx = 5
+    # signal_analyzer_output = np.load("./meas_sig/result/ch{}_bfr_eqz.npy".format(ch_idx))
+    # tx_eqz_des_by_chirp = TxEqzDesByChirp()
+    # unwanted_signal = tx_eqz_des_by_chirp.proc_meas_to_train(signal_analyzer_output[0:4000])
+    # if ch_idx == 4:
+    #     coef = coef_ch4
+    # if ch_idx == 5:
+    #     coef = coef_ch5
+    # equalized_signal = np.convolve(unwanted_signal, coef)[0:len(tx_eqz_des_by_chirp.desired_signal)]
+    # figure = make_subplots(rows=2, cols=1)
+    # figure.add_trace(go.Scatter(y=unwanted_signal.real), row=1, col=1)
+    # figure.add_trace(go.Scatter(y=unwanted_signal.imag), row=2, col=1)
+    # figure.add_trace(go.Scatter(y=equalized_signal.real), row=1, col=1)
+    # figure.add_trace(go.Scatter(y=equalized_signal.imag), row=2, col=1)
+    # unwanted_sig_env = abs(unwanted_signal)
+    # equalized_sig_env = abs(equalized_signal)
+    # pof.iplot(figure)
+    # print(max(unwanted_sig_env) / max(equalized_sig_env))
+    # print(10*np.log10(max(unwanted_sig_env) / max(equalized_sig_env)))
 
     # with open("gen_seq_fixed.json", "r", encoding="UTF-8") as f:
     #     seq_j = json.load(f)

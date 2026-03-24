@@ -15,3 +15,7 @@
     * `python3 gen_test_data.py`
 ## Memory Data Format
 ![](./figure/mem_data_fmt.png)
+
+# Generation of Equalizer Coefficient
+## How to Run
+* `python3 gen_equalizer_coef.py`
