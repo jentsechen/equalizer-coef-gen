@@ -19,3 +19,10 @@
 # Generation of Equalizer Coefficient
 ## How to Run
 * `python3 gen_equalizer_coef.py`
+
+# Generation of Rx Filter
+## How to Run
+```bash
+cd gen_rx_filter
+python3 gen_rx_filter.py
+```
