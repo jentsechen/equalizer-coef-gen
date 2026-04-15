@@ -12,15 +12,15 @@ class TxEqualizerDesign():
 
     def __resample(self, data):
         return resample_poly(data, up=5, down=4)
-    
+
     def __matched_filter(self, rx_waveform):
         return abs(np.convolve(rx_waveform, self.desired_signal.conjugate(), mode='valid'))
-    
+
     def __find_start_idx(self, rx_waveform):
         return np.argmax(self.__matched_filter(rx_waveform))
-    
-    def proc_meas_to_train(self, meas_data):
-        resmp_data = self.__resample(meas_data)
+
+    def proc_meas_to_train(self, meas_data, resample_meas: bool = True):
+        resmp_data = self.__resample(meas_data) if resample_meas else meas_data
         start_idx = self.__find_start_idx(resmp_data)
         return resmp_data[start_idx:(start_idx+len(self.desired_signal))]
 
@@ -45,7 +45,7 @@ class TxEqualizerDesign():
 
         w = np.linalg.solve(R, p)
         return w / sum(w)
-    
+
     def gen_eqz_out(self, meas_data, n_taps, sim_en=False):
         if sim_en == True:
             train_data = meas_data
@@ -64,7 +64,7 @@ class TxEqualizerDesign():
                 im = self.qntz_format.apply(eqz_out[i].imag)
                 eqz_out_fix.append(re + 1j * im)
             return np.array(eqz_out_fix)
-    
+
     def gen_mf_out(self, data):
         mf_out = np.convolve(data, np.conj(self.desired_signal))
         center, width = np.argmax(mf_out), 20
@@ -75,10 +75,10 @@ class TxEqualizerDesign():
 
     def gen_eqz_mf_out(self, meas_data, n_taps):
         return self.gen_mf_out(self.gen_eqz_out(meas_data, n_taps))
-    
+
     def gen_meas_mf_out(self, meas_data):
         return self.gen_mf_out(self.proc_meas_to_train(meas_data))
-    
+
     def find_pslr_db(self, mf_out):
         main_lobe_peak_index = int(np.argmax(mf_out))
         side_lobe_peak_mag_db = []
@@ -100,12 +100,14 @@ class TxEqualizerDesign():
 
         irw_samples = right_index - left_index
         return irw_samples / self.matched_filter_up_factor * 3e8 / 1.25e9 / 2
-    
+
 class TxEqzDesByChirp(TxEqualizerDesign):
-    def __init__(self):
+    def __init__(self, resample_desired: bool = False):
         with open("./training_sig/sig_chirp_s0_15.json", "r", encoding="UTF-8") as f:
             desired_signal_j = json.load(f)
         desired_signal = desired_signal_j["re"] + 1j * np.array(desired_signal_j["im"])
+        if resample_desired:
+            desired_signal = resample_poly(desired_signal, up=3, down=5)
         qntz_format = qt(sign=eSign.Signed, int_bit=0, frac_bit=15, msb=eMSB.Sat, lsb=eLSB.Rnd)
         super().__init__(desired_signal, qntz_format)
 
@@ -122,7 +124,7 @@ class TxEqzDesByChirp(TxEqualizerDesign):
         eqz_out = np.convolve(self.desired_signal, coef)[0:len(self.desired_signal)]
         norm_factor = max(self.__mag_resp(eqz_out)) / max(self.__mag_resp(eqz_in))
         return np.ceil(norm_factor * 100) / 100
-    
+
     def __print_arr(self, data, name):
         arr = "int16_t impulse_coef_" + name + "_s1_14[9] = {"
         for i in range(8):
@@ -130,9 +132,10 @@ class TxEqzDesByChirp(TxEqualizerDesign):
         arr += (str(data[8]) + "};")
         return arr
 
-    def gen_coef(self, file_path="./meas_sig/result/ch4_bfr_eqz.npy", print_en=False):
+    def gen_coef(self, file_path="./meas_sig/result/ch4_bfr_eqz.npy", max_samples: int = 4000, resample_meas: bool = True, print_en=False):
         signal_analyzer_output = np.load(file_path)
-        unwanted_signal = self.proc_meas_to_train(signal_analyzer_output[0:4000])
+        data = signal_analyzer_output if max_samples is None else signal_analyzer_output[0:max_samples]
+        unwanted_signal = self.proc_meas_to_train(data, resample_meas=resample_meas)
         coef = self.train_coef(unwanted_signal=unwanted_signal, n_taps=9).conj()
         norm_factor = self.__gen_norm_factor(coef)
         coef /= norm_factor
@@ -140,7 +143,7 @@ class TxEqzDesByChirp(TxEqualizerDesign):
             print(self.__print_arr(np.array(np.round(coef.real*2**14), dtype=int), "re"))
             print(self.__print_arr(np.array(np.round(coef.imag*2**14), dtype=int), "im"))
         return coef
-    
+
     def load_legacy_coef(self, ch_idx):
         if ch_idx==4:
             re = np.array([-2028, 14481, -200, 3284, -4386, 3863, -3318, 1655, -244])/2**14

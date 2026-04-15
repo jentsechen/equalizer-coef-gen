@@ -1,13 +1,3 @@
-# Calibration Procedure Development
-## How to Run
-* Test power amplifier non-linear model
-    * `python3 test_pow_amp_non_lin.py`
-* Test non-linear effect
-    * `python3 test_non_lin_effect_simulator.py`
-## LUT Non-Linear Model
-![](./figure/am_am.png)
-![](./figure/am_pm.png)
-
 # Test Data Generation of Hardware
 ## How to Run
 * Generate test data to verify digital IP and firmware control on FPGA
@@ -23,6 +13,16 @@
 # Generation of Rx Filter
 ## How to Run
 ```bash
-cd gen_rx_filter
-python3 gen_rx_filter.py
+python3 ./gen_rx_filter/gen_rx_filter.py
 ```
+
+# Calibration Procedure Development
+## How to Run
+* Test power amplifier non-linear model
+    * `python3 test_pow_amp_non_lin.py`
+* Test non-linear effect
+    * `python3 test_non_lin_effect_simulator.py`
+## LUT Non-Linear Model
+![](./figure/am_am.png)
+![](./figure/am_pm.png)
+

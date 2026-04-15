@@ -6,10 +6,7 @@ import numpy as np
 
 from attrs import asdict, define, field, validators
 
-from sys import path
-path += ["/home/jtc/equalizer_analysis/trx_interposer_output_analysis/util"]
-
-from ToJsonBase import ToJsonBase
+from .ToJsonBase import ToJsonBase
 from util.json_io import read_json
 
 
