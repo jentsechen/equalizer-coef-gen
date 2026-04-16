@@ -102,19 +102,13 @@ class TxEqualizerDesign():
         return irw_samples / self.matched_filter_up_factor * 3e8 / 1.25e9 / 2
 
 class TxEqzDesByChirp(TxEqualizerDesign):
-    def __init__(self, resample_desired: bool = False):
-        with open("./training_sig/sig_chirp_s0_15.json", "r", encoding="UTF-8") as f:
-            desired_signal_j = json.load(f)
-        desired_signal = desired_signal_j["re"] + 1j * np.array(desired_signal_j["im"])
-        if resample_desired:
-            desired_signal = resample_poly(desired_signal, up=3, down=5)
+    def __init__(self, fs_is_750mhz: bool = False):
+        file_name = "sig_chirp_750mhz.json" if fs_is_750mhz else "sig_chirp_s0_15.json"
+        with open(f"./training_sig/{file_name}", "r", encoding="UTF-8") as f:
+            sig_j = json.load(f)
+        desired_signal = sig_j["re"] + 1j * np.array(sig_j["im"])
         qntz_format = qt(sign=eSign.Signed, int_bit=0, frac_bit=15, msb=eMSB.Sat, lsb=eLSB.Rnd)
         super().__init__(desired_signal, qntz_format)
-
-    # def __gen_norm_factor(self, coef):
-    #     equalized_signal = np.convolve(self.desired_signal, coef)[0:len(self.desired_signal)]
-    #     norm_factor = max(max(abs(equalized_signal.real)), max(abs(equalized_signal.imag)))
-    #     return np.ceil(norm_factor * 100) / 100
 
     def __mag_resp(self, waveform):
         return abs(np.fft.fftshift(np.fft.fft(waveform)))

@@ -120,7 +120,7 @@ def gen_rx_filter(mode: FreqRespMode = FreqRespMode.ONLY_AAF):
 
 def plot_sig(sig: DistortedSig = DistortedSig.UCDC):
     file_path = os.path.join(_SCRIPT_DIR, sig.value)
-    tx_eqz_des_by_chirp = TxEqzDesByChirp(resample_desired=True)
+    tx_eqz_des_by_chirp = TxEqzDesByChirp(fs_is_750mhz=True)
     eqz_imp_resp = tx_eqz_des_by_chirp.gen_coef(
         file_path=file_path, resample_meas=False
     )
@@ -141,7 +141,33 @@ def plot_sig(sig: DistortedSig = DistortedSig.UCDC):
     os.makedirs(fig_dir, exist_ok=True)
     figure.write_html(os.path.join(fig_dir, "signals.html"))
 
+def _chirp_rate(sig, fs):
+    """Return instantaneous frequency (MHz) and chirp rate (MHz/µs) via linear fit."""
+    inst_freq_hz = np.diff(np.unwrap(np.angle(sig))) / (2 * np.pi) * fs
+    slope_hz_per_sample = np.polyfit(np.arange(len(inst_freq_hz)), inst_freq_hz, 1)[0]
+    chirp_rate_mhz_per_us = slope_hz_per_sample * fs / 1e12
+    return chirp_rate_mhz_per_us
+
+
+def plot_resample():
+    with open("./training_sig/sig_chirp_750mhz.json", "r", encoding="UTF-8") as f:
+        sig_750mhz_j = json.load(f)
+    sig_750mhz = sig_750mhz_j["re"] + 1j * np.array(sig_750mhz_j["im"])
+    with open("./training_sig/sig_chirp_s0_15.json", "r", encoding="UTF-8") as f:
+        sig_1250mhz_j = json.load(f)
+    sig_1250mhz = sig_1250mhz_j["re"] + 1j * np.array(sig_1250mhz_j["im"])
+    sig_750mhz_by_resample = resample_poly(sig_1250mhz, up=3, down=5)
+
+    cr_1250 = _chirp_rate(sig_1250mhz,          fs=1.25e9)
+    cr_750 = _chirp_rate(sig_750mhz,            fs=0.75e9)
+    cr_750_rs = _chirp_rate(sig_750mhz_by_resample, fs=0.75e9)
+
+    print(f"1.25GHz, chirp rate = {cr_1250:.3f} MHz/µs")
+    print(f"750MHz, chirp rate = {cr_750:.3f} MHz/µs")
+    print(f"750MHz by resample, chirp rate = {cr_750_rs:.3f} MHz/µs")
+
 
 if __name__ == "__main__":
     gen_rx_filter(mode=FreqRespMode.AAF_EQZ)
     plot_sig(sig=DistortedSig.DC)
+    # plot_resample()
