@@ -146,7 +146,7 @@ def _chirp_rate(sig, fs):
     inst_freq_hz = np.diff(np.unwrap(np.angle(sig))) / (2 * np.pi) * fs
     slope_hz_per_sample = np.polyfit(np.arange(len(inst_freq_hz)), inst_freq_hz, 1)[0]
     chirp_rate_mhz_per_us = slope_hz_per_sample * fs / 1e12
-    return chirp_rate_mhz_per_us
+    return inst_freq_hz, chirp_rate_mhz_per_us
 
 
 def plot_resample():
@@ -158,13 +158,29 @@ def plot_resample():
     sig_1250mhz = sig_1250mhz_j["re"] + 1j * np.array(sig_1250mhz_j["im"])
     sig_750mhz_by_resample = resample_poly(sig_1250mhz, up=3, down=5)
 
-    cr_1250 = _chirp_rate(sig_1250mhz,          fs=1.25e9)
-    cr_750 = _chirp_rate(sig_750mhz,            fs=0.75e9)
-    cr_750_rs = _chirp_rate(sig_750mhz_by_resample, fs=0.75e9)
+    _, cr_1250 = _chirp_rate(sig_1250mhz,          fs=1.25e9)
+    inst_freq_750, cr_750 = _chirp_rate(sig_750mhz,            fs=0.75e9)
+    inst_freq_750_rs, cr_750_rs = _chirp_rate(sig_750mhz_by_resample, fs=0.75e9)
 
     print(f"1.25GHz, chirp rate = {cr_1250:.3f} MHz/µs")
     print(f"750MHz, chirp rate = {cr_750:.3f} MHz/µs")
     print(f"750MHz by resample, chirp rate = {cr_750_rs:.3f} MHz/µs")
+
+    fs_750 = 0.75e9
+    time_750_us    = np.arange(len(inst_freq_750))    / fs_750 * 1e6
+    time_750_rs_us = np.arange(len(inst_freq_750_rs)) / fs_750 * 1e6
+
+    figure = make_subplots(rows=1, cols=1)
+    figure.add_trace(go.Scatter(x=time_750_us,    y=inst_freq_750    / 1e6, name="750MHz"),              row=1, col=1)
+    figure.add_trace(go.Scatter(x=time_750_rs_us, y=inst_freq_750_rs / 1e6, name="750MHz by resample"), row=1, col=1)
+    figure.update_layout(
+        font=dict(size=20),
+        xaxis=dict(title="time (us)", range=[0, 3.28]),
+        yaxis=dict(title="frequency (MHz)"),
+    )
+    fig_dir = os.path.join(_SCRIPT_DIR, "figure")
+    os.makedirs(fig_dir, exist_ok=True)
+    figure.write_html(os.path.join(fig_dir, "resample.html"))
 
 
 if __name__ == "__main__":
