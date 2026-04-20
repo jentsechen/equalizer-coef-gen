@@ -1,3 +1,4 @@
+# isort: skip_file
 import sys
 import os
 
@@ -17,13 +18,13 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 class FreqRespMode(Enum):
     ONLY_AAF = "only-aaf"
-    AAF_EQZ  = "aaf-eqz"
+    AAF_EQZ = "aaf-eqz"
     ONLY_EQZ = "only-eqz"
 
 
 class DistortedSig(Enum):
     UCDC = "update_aaf_freq_resp/ucdc_distorted_sig.npy"
-    DC   = "update_aaf_freq_resp/dc_distorted_sig.npy"
+    DC = "update_aaf_freq_resp/dc_distorted_sig.npy"
 
 
 def apply_qntz_cpx(qntz_format: qt, data: np.ndarray) -> np.ndarray:
@@ -78,6 +79,7 @@ def save_freq_resp_table(aaf_freq_resp_qntz_list):
     with open(os.path.join(out_dir, "aaf_freq_resp_table_imag.txt"), "w") as f:
         f.write(",".join(map(str, imag_int)))
 
+
 def gen_eqz_imp_resp(sig: DistortedSig = DistortedSig.DC):
     tx_eqz_des_by_chirp = TxEqzDesByChirp(fs_is_750mhz=True)
     eqz_imp_resp = tx_eqz_des_by_chirp.gen_coef(
@@ -85,12 +87,15 @@ def gen_eqz_imp_resp(sig: DistortedSig = DistortedSig.DC):
     )
     return eqz_imp_resp
 
+
 def gen_eqz_freq_resp(sig: DistortedSig = DistortedSig.DC):
     eqz_imp_resp = gen_eqz_imp_resp(sig=sig)
     return np.fft.fft(a=np.array(eqz_imp_resp), n=256)
 
 
-def gen_rx_filter(mode: FreqRespMode = FreqRespMode.ONLY_AAF, sig: DistortedSig = DistortedSig.DC):
+def gen_rx_filter(
+    mode: FreqRespMode = FreqRespMode.ONLY_AAF, sig: DistortedSig = DistortedSig.DC
+):
     qntz_format = qt(
         sign=eSign.Signed, int_bit=1, frac_bit=14, msb=eMSB.Sat, lsb=eLSB.Rnd
     )
@@ -100,7 +105,11 @@ def gen_rx_filter(mode: FreqRespMode = FreqRespMode.ONLY_AAF, sig: DistortedSig 
         encoding="UTF-8",
     ) as f:
         aaf_freq_resp_j = json.load(f)
-    eqz_resp = gen_eqz_freq_resp(sig) if mode in (FreqRespMode.AAF_EQZ, FreqRespMode.ONLY_EQZ) else None
+    eqz_resp = (
+        gen_eqz_freq_resp(sig)
+        if mode in (FreqRespMode.AAF_EQZ, FreqRespMode.ONLY_EQZ)
+        else None
+    )
     aaf_freq_resp_qntz_list = []
     for i in range(9):
         aaf_resp = np.array(aaf_freq_resp_j["re"][i]) + 1j * np.array(
@@ -121,17 +130,40 @@ def gen_rx_filter(mode: FreqRespMode = FreqRespMode.ONLY_AAF, sig: DistortedSig 
 
 
 def plot_sig(sig: DistortedSig = DistortedSig.DC):
-    file_path = os.path.join(_SCRIPT_DIR, sig.value)
     eqz_imp_resp = gen_eqz_imp_resp(sig=sig)
-    distorted_sig = np.load(file_path)
+    distorted_sig = np.load(os.path.join(_SCRIPT_DIR, sig.value))
     compensated_signal = np.convolve(a=distorted_sig, v=eqz_imp_resp)
     figure = make_subplots(rows=3, cols=1)
-    figure.add_trace(go.Scatter(y=distorted_sig.real, name="distorted signal, real part"), row=1, col=1)
-    figure.add_trace(go.Scatter(y=distorted_sig.imag, name="distorted signal, imag. part"), row=2, col=1)
-    figure.add_trace(go.Scatter(y=abs(distorted_sig), name="distorted signal, envelope"), row=3, col=1)
-    figure.add_trace(go.Scatter(y=compensated_signal.real, name="compensated signal, real part"), row=1, col=1)
-    figure.add_trace(go.Scatter(y=compensated_signal.imag, name="compensated signal, imag. part"), row=2, col=1)
-    figure.add_trace(go.Scatter(y=abs(compensated_signal), name="compensated signal, envelope"), row=3, col=1)
+    figure.add_trace(
+        go.Scatter(y=distorted_sig.real, name="distorted signal, real part"),
+        row=1,
+        col=1,
+    )
+    figure.add_trace(
+        go.Scatter(y=distorted_sig.imag, name="distorted signal, imag. part"),
+        row=2,
+        col=1,
+    )
+    figure.add_trace(
+        go.Scatter(y=abs(distorted_sig), name="distorted signal, envelope"),
+        row=3,
+        col=1,
+    )
+    figure.add_trace(
+        go.Scatter(y=compensated_signal.real, name="compensated signal, real part"),
+        row=1,
+        col=1,
+    )
+    figure.add_trace(
+        go.Scatter(y=compensated_signal.imag, name="compensated signal, imag. part"),
+        row=2,
+        col=1,
+    )
+    figure.add_trace(
+        go.Scatter(y=abs(compensated_signal), name="compensated signal, envelope"),
+        row=3,
+        col=1,
+    )
     figure.update_layout(
         font=dict(size=20),
         margin=dict(l=80, r=20, t=20, b=60),
@@ -139,6 +171,7 @@ def plot_sig(sig: DistortedSig = DistortedSig.DC):
     fig_dir = os.path.join(_SCRIPT_DIR, "figure")
     os.makedirs(fig_dir, exist_ok=True)
     figure.write_html(os.path.join(fig_dir, "signals.html"))
+
 
 def _chirp_rate(sig, fs):
     """Return instantaneous frequency (MHz) and chirp rate (MHz/µs) via linear fit."""
@@ -157,8 +190,8 @@ def plot_resample():
     sig_1250mhz = sig_1250mhz_j["re"] + 1j * np.array(sig_1250mhz_j["im"])
     sig_750mhz_by_resample = resample_poly(sig_1250mhz, up=3, down=5)
 
-    _, cr_1250 = _chirp_rate(sig_1250mhz,          fs=1.25e9)
-    inst_freq_750, cr_750 = _chirp_rate(sig_750mhz,            fs=0.75e9)
+    _, cr_1250 = _chirp_rate(sig_1250mhz, fs=1.25e9)
+    inst_freq_750, cr_750 = _chirp_rate(sig_750mhz, fs=0.75e9)
     inst_freq_750_rs, cr_750_rs = _chirp_rate(sig_750mhz_by_resample, fs=0.75e9)
 
     print(f"1.25GHz, chirp rate = {cr_1250:.3f} MHz/µs")
@@ -166,12 +199,20 @@ def plot_resample():
     print(f"750MHz by resample, chirp rate = {cr_750_rs:.3f} MHz/µs")
 
     fs_750 = 0.75e9
-    time_750_us    = np.arange(len(inst_freq_750))    / fs_750 * 1e6
+    time_750_us = np.arange(len(inst_freq_750)) / fs_750 * 1e6
     time_750_rs_us = np.arange(len(inst_freq_750_rs)) / fs_750 * 1e6
 
     figure = make_subplots(rows=1, cols=1)
-    figure.add_trace(go.Scatter(x=time_750_us,    y=inst_freq_750    / 1e6, name="750MHz"),              row=1, col=1)
-    figure.add_trace(go.Scatter(x=time_750_rs_us, y=inst_freq_750_rs / 1e6, name="750MHz by resample"), row=1, col=1)
+    figure.add_trace(
+        go.Scatter(x=time_750_us, y=inst_freq_750 / 1e6, name="750MHz"), row=1, col=1
+    )
+    figure.add_trace(
+        go.Scatter(
+            x=time_750_rs_us, y=inst_freq_750_rs / 1e6, name="750MHz by resample"
+        ),
+        row=1,
+        col=1,
+    )
     figure.update_layout(
         font=dict(size=20),
         xaxis=dict(title="time (us)", range=[0, 3.28]),
