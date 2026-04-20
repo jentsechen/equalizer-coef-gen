@@ -78,18 +78,19 @@ def save_freq_resp_table(aaf_freq_resp_qntz_list):
     with open(os.path.join(out_dir, "aaf_freq_resp_table_imag.txt"), "w") as f:
         f.write(",".join(map(str, imag_int)))
 
-
-def eqz_freq_resp():
-    file_name = "update_aaf_freq_resp/ucdc_distorted_sig.npy"
-    # file_name = "update_aaf_freq_resp/dc_distorted_sig.npy"
-    tx_eqz_des_by_chirp = TxEqzDesByChirp()
+def gen_eqz_imp_resp(sig: DistortedSig = DistortedSig.DC):
+    tx_eqz_des_by_chirp = TxEqzDesByChirp(fs_is_750mhz=True)
     eqz_imp_resp = tx_eqz_des_by_chirp.gen_coef(
-        file_path=os.path.join(_SCRIPT_DIR, file_name)
+        file_path=os.path.join(_SCRIPT_DIR, sig.value), resample_meas=False
     )
+    return eqz_imp_resp
+
+def gen_eqz_freq_resp(sig: DistortedSig = DistortedSig.DC):
+    eqz_imp_resp = gen_eqz_imp_resp(sig=sig)
     return np.fft.fft(a=np.array(eqz_imp_resp), n=256)
 
 
-def gen_rx_filter(mode: FreqRespMode = FreqRespMode.ONLY_AAF):
+def gen_rx_filter(mode: FreqRespMode = FreqRespMode.ONLY_AAF, sig: DistortedSig = DistortedSig.DC):
     qntz_format = qt(
         sign=eSign.Signed, int_bit=1, frac_bit=14, msb=eMSB.Sat, lsb=eLSB.Rnd
     )
@@ -99,7 +100,7 @@ def gen_rx_filter(mode: FreqRespMode = FreqRespMode.ONLY_AAF):
         encoding="UTF-8",
     ) as f:
         aaf_freq_resp_j = json.load(f)
-    eqz_resp = eqz_freq_resp() if mode in (FreqRespMode.AAF_EQZ, FreqRespMode.ONLY_EQZ) else None
+    eqz_resp = gen_eqz_freq_resp(sig) if mode in (FreqRespMode.AAF_EQZ, FreqRespMode.ONLY_EQZ) else None
     aaf_freq_resp_qntz_list = []
     for i in range(9):
         aaf_resp = np.array(aaf_freq_resp_j["re"][i]) + 1j * np.array(
@@ -111,6 +112,7 @@ def gen_rx_filter(mode: FreqRespMode = FreqRespMode.ONLY_AAF):
             freq_resp = aaf_resp * eqz_resp
         else:  # ONLY_EQZ
             freq_resp = eqz_resp
+        freq_resp /= max([max(freq_resp.real), max(freq_resp.imag)])
         aaf_freq_resp_qntz_list.append(apply_qntz_cpx(qntz_format, freq_resp))
 
     plot_freq_resp(aaf_freq_resp_qntz_list)
@@ -118,12 +120,9 @@ def gen_rx_filter(mode: FreqRespMode = FreqRespMode.ONLY_AAF):
     save_freq_resp_table(aaf_freq_resp_qntz_list)
 
 
-def plot_sig(sig: DistortedSig = DistortedSig.UCDC):
+def plot_sig(sig: DistortedSig = DistortedSig.DC):
     file_path = os.path.join(_SCRIPT_DIR, sig.value)
-    tx_eqz_des_by_chirp = TxEqzDesByChirp(fs_is_750mhz=True)
-    eqz_imp_resp = tx_eqz_des_by_chirp.gen_coef(
-        file_path=file_path, resample_meas=False
-    )
+    eqz_imp_resp = gen_eqz_imp_resp(sig=sig)
     distorted_sig = np.load(file_path)
     compensated_signal = np.convolve(a=distorted_sig, v=eqz_imp_resp)
     figure = make_subplots(rows=3, cols=1)
@@ -184,6 +183,6 @@ def plot_resample():
 
 
 if __name__ == "__main__":
-    gen_rx_filter(mode=FreqRespMode.AAF_EQZ)
+    gen_rx_filter(mode=FreqRespMode.AAF_EQZ, sig=DistortedSig.DC)
     plot_sig(sig=DistortedSig.DC)
     # plot_resample()
