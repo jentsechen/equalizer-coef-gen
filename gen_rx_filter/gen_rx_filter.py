@@ -1,4 +1,3 @@
-# isort: skip_file
 import sys
 import os
 
@@ -11,15 +10,18 @@ from chisel3cr.common import qt, eSign, eMSB, eLSB
 import plotly.graph_objs as go
 from plotly.subplots import make_subplots
 from tx_equalizer_design import TxEqzDesByChirp
-from enum import Enum
+from enum import Enum, auto
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 class FreqRespMode(Enum):
-    ONLY_AAF = "only-aaf"
-    AAF_EQZ = "aaf-eqz"
-    ONLY_EQZ = "only-eqz"
+    ONLY_AAF, ONLY_EQZ, AAF_EQZ_DIRECT_COMB, AAF_EQZ_JOINT_OPT = (
+        auto(),
+        auto(),
+        auto(),
+        auto(),
+    )
 
 
 class DistortedSig(Enum):
@@ -28,23 +30,34 @@ class DistortedSig(Enum):
 
 
 def apply_qntz_cpx(qntz_format: qt, data: np.ndarray) -> np.ndarray:
+    """Apply fixed-point quantization independently to the real and imaginary parts."""
     apply = np.vectorize(qntz_format.apply)
     return apply(data.real) + 1j * apply(data.imag)
 
 
 def plot_freq_resp(aaf_freq_resp_qntz_list):
+    """Plot magnitude (dB) and unwrapped phase of all quantized AAF frequency responses."""
     n_bins = len(aaf_freq_resp_qntz_list[0])
     freq_axis = np.linspace(-375, 375, n_bins)
-    figure = make_subplots(rows=1, cols=1)
+    figure = make_subplots(rows=2, cols=1)
     for i, freq_resp_qntz in enumerate(aaf_freq_resp_qntz_list):
-        mag_db_qntz = 10 * np.log10(
-            np.maximum(np.abs(np.fft.fftshift(freq_resp_qntz)), 1e-12)
+        shifted = np.fft.fftshift(freq_resp_qntz)
+        mag_db_qntz = 10 * np.log10(np.maximum(np.abs(shifted), 1e-12))
+        phase_deg = np.degrees(np.unwrap(np.angle(shifted)))
+        figure.add_trace(
+            go.Scatter(x=freq_axis, y=mag_db_qntz, name=f"filter {i}"), row=1, col=1
         )
-        figure.add_trace(go.Scatter(x=freq_axis, y=mag_db_qntz, name=f"filter {i}"))
+        figure.add_trace(
+            go.Scatter(x=freq_axis, y=phase_deg, name=f"filter {i}", showlegend=False),
+            row=2,
+            col=1,
+        )
     figure.update_layout(
         xaxis=dict(title="frequency (MHz)"),
         # yaxis=dict(title="magnitude (dB)", range=[-25, 1]),
         yaxis=dict(title="magnitude (dB)"),
+        xaxis2=dict(title="frequency (MHz)"),
+        yaxis2=dict(title="phase (deg)"),
         font=dict(size=20),
         margin=dict(l=80, r=20, t=20, b=60),
     )
@@ -54,6 +67,7 @@ def plot_freq_resp(aaf_freq_resp_qntz_list):
 
 
 def plot_time_resp(aaf_freq_resp_qntz_list):
+    """Plot the impulse response (IFFT of freq resp) of all quantized AAF filters."""
     figure = make_subplots(rows=1, cols=1)
     for i, freq_resp_qntz in enumerate(aaf_freq_resp_qntz_list):
         time_resp_qntz = np.fft.ifft(freq_resp_qntz).real
@@ -70,6 +84,7 @@ def plot_time_resp(aaf_freq_resp_qntz_list):
 
 
 def save_freq_resp_table(aaf_freq_resp_qntz_list):
+    """Save all AAF frequency response coefficients as s1.14 integers to .txt files."""
     aaf_freq_resp_table = np.array(aaf_freq_resp_qntz_list).flatten()
     real_int = (aaf_freq_resp_table.real * 2**14).astype(int)
     imag_int = (aaf_freq_resp_table.imag * 2**14).astype(int)
@@ -81,6 +96,7 @@ def save_freq_resp_table(aaf_freq_resp_qntz_list):
 
 
 def gen_eqz_imp_resp(sig: DistortedSig = DistortedSig.DC):
+    """Generate the equalizer impulse response from the measured distorted signal file."""
     tx_eqz_des_by_chirp = TxEqzDesByChirp(fs_is_750mhz=True)
     eqz_imp_resp = tx_eqz_des_by_chirp.gen_coef(
         file_path=os.path.join(_SCRIPT_DIR, sig.value), resample_meas=False
@@ -89,13 +105,15 @@ def gen_eqz_imp_resp(sig: DistortedSig = DistortedSig.DC):
 
 
 def gen_eqz_freq_resp(sig: DistortedSig = DistortedSig.DC):
+    """Return the 256-bin FFT of the equalizer impulse response."""
     eqz_imp_resp = gen_eqz_imp_resp(sig=sig)
     return np.fft.fft(a=np.array(eqz_imp_resp), n=256)
 
 
-def gen_rx_filter(
+def _compute_rx_filter_list(
     mode: FreqRespMode = FreqRespMode.ONLY_AAF, sig: DistortedSig = DistortedSig.DC
 ):
+    """Compute and return the 9 quantized RX filter frequency responses for the given mode."""
     qntz_format = qt(
         sign=eSign.Signed, int_bit=1, frac_bit=14, msb=eMSB.Sat, lsb=eLSB.Rnd
     )
@@ -107,7 +125,7 @@ def gen_rx_filter(
         aaf_freq_resp_j = json.load(f)
     eqz_resp = (
         gen_eqz_freq_resp(sig)
-        if mode in (FreqRespMode.AAF_EQZ, FreqRespMode.ONLY_EQZ)
+        if mode in (FreqRespMode.AAF_EQZ_DIRECT_COMB, FreqRespMode.ONLY_EQZ)
         else None
     )
     aaf_freq_resp_qntz_list = []
@@ -117,19 +135,31 @@ def gen_rx_filter(
         )
         if mode == FreqRespMode.ONLY_AAF:
             freq_resp = aaf_resp
-        elif mode == FreqRespMode.AAF_EQZ:
+        elif mode == FreqRespMode.AAF_EQZ_DIRECT_COMB:
             freq_resp = aaf_resp * eqz_resp
-        else:  # ONLY_EQZ
+        # elif mode == FreqRespMode.AAF_EQZ_JOINT_OPT:
+        #     pass
+        elif mode == FreqRespMode.ONLY_EQZ:
             freq_resp = eqz_resp
+        else:
+            raise ValueError(f"Mode {mode} is not supported!")
         freq_resp /= max([max(freq_resp.real), max(freq_resp.imag)])
         aaf_freq_resp_qntz_list.append(apply_qntz_cpx(qntz_format, freq_resp))
+    return aaf_freq_resp_qntz_list
 
+
+def gen_rx_filter(
+    mode: FreqRespMode = FreqRespMode.ONLY_AAF, sig: DistortedSig = DistortedSig.DC
+):
+    """Build, quantize, plot, and save the RX filter table for the selected FreqRespMode."""
+    aaf_freq_resp_qntz_list = _compute_rx_filter_list(mode, sig)
     plot_freq_resp(aaf_freq_resp_qntz_list)
     plot_time_resp(aaf_freq_resp_qntz_list)
     save_freq_resp_table(aaf_freq_resp_qntz_list)
 
 
 def plot_sig(sig: DistortedSig = DistortedSig.DC):
+    """Plot distorted signal and its gen_eqz-compensated version (real, imag, envelope)."""
     eqz_imp_resp = gen_eqz_imp_resp(sig=sig)
     distorted_sig = np.load(os.path.join(_SCRIPT_DIR, sig.value))
     compensated_signal = np.convolve(a=distorted_sig, v=eqz_imp_resp)
@@ -182,6 +212,7 @@ def _chirp_rate(sig, fs):
 
 
 def plot_resample():
+    """Plot instantaneous frequency of the 750 MHz chirp vs. the 1.25 GHz chirp resampled to 750 MHz."""
     with open("./training_sig/sig_chirp_750mhz.json", "r", encoding="UTF-8") as f:
         sig_750mhz_j = json.load(f)
     sig_750mhz = sig_750mhz_j["re"] + 1j * np.array(sig_750mhz_j["im"])
@@ -224,6 +255,6 @@ def plot_resample():
 
 
 if __name__ == "__main__":
-    gen_rx_filter(mode=FreqRespMode.AAF_EQZ, sig=DistortedSig.DC)
+    gen_rx_filter(mode=FreqRespMode.AAF_EQZ_DIRECT_COMB, sig=DistortedSig.DC)
     plot_sig(sig=DistortedSig.DC)
     # plot_resample()
