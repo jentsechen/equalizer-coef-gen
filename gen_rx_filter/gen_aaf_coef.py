@@ -77,6 +77,9 @@ class FirlsFilterDesign:
         gain: Desired complex or real magnitude at each frequency point.
         f_stop_mhz: Stopband start in MHz; 0 disables the stopband constraint.
         w_stop: Stopband weight relative to passband bands (default 100).
+        window: Window applied to coefficients after firls; passed to
+            scipy.signal.get_window (e.g. 'hamming', 'hann', ('kaiser', 6)).
+            None disables windowing.
         response: Computed FIR coefficients, populated by __post_init__.
     """
 
@@ -86,6 +89,7 @@ class FirlsFilterDesign:
     gain: np.ndarray = None
     f_stop_mhz: float = 0.0
     w_stop: float = 100.0
+    window: object = None
     response: np.ndarray = None
 
     def __post_init__(self):
@@ -114,6 +118,8 @@ class FirlsFilterDesign:
         self.response = signal.firls(
             self.n_taps, bands, desired, weight=weights, fs=self.fs_mhz
         )
+        if self.window is not None:
+            self.response *= signal.get_window(self.window, self.n_taps)
 
 
 def aaf_coef_gen(f_pass_mhz=325,
@@ -187,57 +193,58 @@ def phase_deg(H):
     return np.degrees(np.unwrap(np.angle(H)))
 
 
-def compute_responses(f_pass_mhz, fs_mhz=750.0, n=256):
+def compute_responses(f_pass_mhz, fs_mhz=750.0, n=256, window='hamming'):
     """Compute frequency responses for the least-square EQZ filter, raw EQZ, and AAF×EQZ.
 
     Args:
+        f_pass_mhz: Passband edge in MHz, used for AAF and firls stopband placement.
         fs_mhz: Sample rate in MHz.
         n: FFT size used to evaluate the frequency responses.
+        window: Window applied to the windowed firls variant; passed to
+            scipy.signal.get_window (e.g. 'hamming', 'hann', ('kaiser', 6)).
 
     Returns:
-        Tuple (H_fir, H_eqz, H_combined, freq_axis) where each H is a
+        Tuple (H_fir_win, H_eqz, H_combined, freq_axis) where each H is a
         complex ndarray of length n in fftshift order and freq_axis is the
         corresponding frequency axis in MHz.
     """
     eqz_resp = gen_eqz_freq_resp(sig=DistortedSig.UCDC, n_taps=4)
     freq_mhz = np.arange(n // 2) * fs_mhz / n
     gain = eqz_resp[:n // 2]
-    fir = FirlsFilterDesign(
-        fs_mhz=fs_mhz,
-        n_taps=63,
-        freq_mhz=freq_mhz,
-        gain=gain,
-        f_stop_mhz=f_pass_mhz+25,
-        w_stop=100,
-    )
-    H_fir = np.fft.fftshift(np.fft.fft(fir.response, n))
+    fir_win = FirlsFilterDesign(fs_mhz=fs_mhz, n_taps=63, freq_mhz=freq_mhz, gain=gain,
+                                f_stop_mhz=f_pass_mhz + 25, w_stop=100, window=window)
+    H_fir_win = np.fft.fftshift(np.fft.fft(fir_win.response, n))
     H_eqz = np.fft.fftshift(eqz_resp)
     aaf_coef = aaf_coef_gen(f_pass_mhz=f_pass_mhz)
     H_combined = np.fft.fftshift(np.fft.fft(aaf_coef, n) * eqz_resp)
     freq_axis = np.fft.fftshift(np.arange(n) * fs_mhz / n - fs_mhz * (np.arange(n) >= n // 2))
-    return H_fir, H_eqz, H_combined, freq_axis
+    return H_fir_win, H_eqz, H_combined, freq_axis
 
 
-def plot_magnitude_resp(freq_axis, H_fir, H_eqz, H_combined, out_dir, font_size):
-    """Plot magnitude responses of the three filters and save to magnitude_resp.html."""
+def plot_magnitude_resp(freq_axis, H_fir_win, H_eqz, H_combined, out_dir, font_size):
+    """Plot magnitude responses of the three filters and save to magnitude_resp.html and .png."""
     fig = go.Figure()
-    for H, name in [(H_eqz, 'equalizer'), (H_combined, 'comb. of AAF and equalizer'), (H_fir, 'least square')]:
+    for H, name in [(H_eqz, 'equalizer'), (H_combined, 'comb. of AAF and equalizer'),
+                    (H_fir_win, 'least square (windowed)')]:
         fig.add_trace(go.Scatter(x=freq_axis.tolist(), y=mag_db(H).tolist(), name=name))
     fig.update_layout(xaxis_title='frequency (MHz)', yaxis_title='magnitude (dB)', font=dict(size=font_size))
     fig.write_html(os.path.join(out_dir, 'magnitude_resp.html'))
+    fig.update_layout(xaxis=dict(range=[-180, 180]), yaxis=dict(range=[-1, 0.5]), margin=dict(t=10), font=dict(size=14))
+    fig.write_image(os.path.join(out_dir, 'magnitude_resp.png'), width=1400)
 
 
-def plot_phase_resp(freq_axis, H_fir, H_eqz, H_combined, out_dir, font_size):
+def plot_phase_resp(freq_axis, H_fir_win, H_eqz, H_combined, out_dir, font_size):
     """Plot phase responses of the three filters and save to phase_resp.html."""
     fig = go.Figure()
-    for H, name in [(H_eqz, 'equalizer'), (H_combined, 'comb. of AAF and equalizer'), (H_fir, 'least square')]:
+    for H, name in [(H_eqz, 'equalizer'), (H_combined, 'comb. of AAF and equalizer'),
+                    (H_fir_win, 'least square (windowed)')]:
         fig.add_trace(go.Scatter(x=freq_axis.tolist(), y=phase_deg(H).tolist(), name=name))
     fig.update_layout(xaxis_title='frequency (MHz)', yaxis_title='phase (deg)', font=dict(size=font_size))
     fig.write_html(os.path.join(out_dir, 'phase_resp.html'))
 
 
-def plot_inband_error(freq_axis, H_fir, H_eqz, H_combined, out_dir, font_size, f_pass_mhz=325):
-    """Plot in-band magnitude error of H_fir and H_combined relative to H_eqz.
+def plot_inband_error(freq_axis, H_fir_win, H_eqz, H_combined, out_dir, font_size, f_pass_mhz=325):
+    """Plot in-band magnitude error of H_fir_win and H_combined relative to H_eqz.
 
     Args:
         f_pass_mhz: Passband edge in MHz; only frequencies within ±f_pass_mhz are shown.
@@ -245,21 +252,28 @@ def plot_inband_error(freq_axis, H_fir, H_eqz, H_combined, out_dir, font_size, f
     pb = np.abs(freq_axis) < f_pass_mhz
     freq_pb = freq_axis[pb]
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=freq_pb.tolist(), y=(mag_db(H_combined)[pb] - mag_db(H_eqz)[pb]).tolist(), name='comb. of AAF and equalizer'))
-    fig.add_trace(go.Scatter(x=freq_pb.tolist(), y=(mag_db(H_fir)[pb] - mag_db(H_eqz)[pb]).tolist(), name='least square'))
+    for H, name in [(H_combined, 'comb. of AAF and equalizer'),
+                    (H_fir_win, 'least square (windowed)')]:
+        fig.add_trace(go.Scatter(x=freq_pb.tolist(), y=np.abs(mag_db(H)[pb] - mag_db(H_eqz)[pb]).tolist(), name=name))
     fig.update_layout(xaxis_title='frequency (MHz)', yaxis_title='magnitude error (dB)', font=dict(size=font_size))
     fig.write_html(os.path.join(out_dir, 'inband_error.html'))
+    fig.update_layout(margin=dict(t=10), font=dict(size=14))
+    fig.write_image(os.path.join(out_dir, 'inband_error.png'), width=1400)
 
 
-def print_group_delay(freq_axis, H_fir, H_eqz, H_combined, fs_mhz, f_pass_mhz=325):
-    """Print group delay of the three filters estimated from a linear phase fit over the passband.
+def print_group_delay(freq_axis, H_fir_win, H_eqz, H_combined, fs_mhz, f_pass_mhz=325):
+    """Print group delay of all filters estimated from a linear phase fit over the passband.
 
     Args:
         f_pass_mhz: Passband edge in MHz used to select the fitting region.
     """
-    pb = np.abs(freq_axis) < f_pass_mhz
-    for label, H in [('equalizer', H_eqz), ('comb. of AAF and equalizer', H_combined), ('least square', H_fir)]:
-        slope = np.polyfit(freq_axis[pb], phase_deg(H)[pb], 1)[0]  # deg/MHz
+    pos = freq_axis > 0
+    freq_pos = freq_axis[pos]
+    pb = freq_pos < f_pass_mhz
+    for label, H in [('equalizer', H_eqz), ('comb. of AAF and equalizer', H_combined),
+                     ('least square (windowed)', H_fir_win)]:
+        phase = np.degrees(np.unwrap(np.angle(H[pos])))  # unwrap on positive freqs only
+        slope = np.polyfit(freq_pos[pb], phase[pb], 1)[0]  # deg/MHz
         gd_ns = -slope / 0.36
         gd_samples = gd_ns * fs_mhz * 1e-3
         print(f'{label}: group delay = {gd_ns:.1f} ns  ({gd_samples:.1f} samples)')
@@ -269,14 +283,14 @@ if __name__ == "__main__":
     fs_mhz = 750.0
     n = 256
     f_pass_mhz = 162.5
-    H_fir, H_eqz, H_combined, freq_axis = compute_responses(f_pass_mhz, fs_mhz, n)
+    H_fir_win, H_eqz, H_combined, freq_axis = compute_responses(f_pass_mhz, fs_mhz, n)
 
     out_dir = os.path.join(os.path.dirname(__file__), 'figure', 'aaf_resp')
     os.makedirs(out_dir, exist_ok=True)
 
     font_size = 25
-    plot_magnitude_resp(freq_axis, H_fir, H_eqz, H_combined, out_dir, font_size)
-    plot_phase_resp(freq_axis, H_fir, H_eqz, H_combined, out_dir, font_size)
-    plot_inband_error(freq_axis, H_fir, H_eqz, H_combined, out_dir, font_size, f_pass_mhz)
-    print_group_delay(freq_axis, H_fir, H_eqz, H_combined, fs_mhz)
+    plot_magnitude_resp(freq_axis, H_fir_win, H_eqz, H_combined, out_dir, font_size)
+    plot_phase_resp(freq_axis, H_fir_win, H_eqz, H_combined, out_dir, font_size)
+    plot_inband_error(freq_axis, H_fir_win, H_eqz, H_combined, out_dir, font_size, f_pass_mhz)
+    print_group_delay(freq_axis, H_fir_win, H_eqz, H_combined, fs_mhz)
     

@@ -41,6 +41,7 @@ equalizer-coef-gen/
 * `python3 gen_equalizer_coef.py`
 
 # Generation of Rx Filter
+See [gen_rx_filter/README.md](gen_rx_filter/README.md) for design details and result figures.
 ## How to Run
 ```bash
 python3 ./gen_rx_filter/gen_rx_filter.py
