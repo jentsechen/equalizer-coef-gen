@@ -95,18 +95,18 @@ def save_freq_resp_table(aaf_freq_resp_qntz_list):
         f.write(",".join(map(str, imag_int)))
 
 
-def gen_eqz_imp_resp(sig: DistortedSig = DistortedSig.DC):
+def gen_eqz_imp_resp(sig: DistortedSig = DistortedSig.DC, n_taps=9):
     """Generate the equalizer impulse response from the measured distorted signal file."""
     tx_eqz_des_by_chirp = TxEqzDesByChirp(fs_is_750mhz=True)
     eqz_imp_resp = tx_eqz_des_by_chirp.gen_coef(
-        file_path=os.path.join(_SCRIPT_DIR, sig.value), resample_meas=False
+        file_path=os.path.join(_SCRIPT_DIR, sig.value), resample_meas=False, n_taps=n_taps
     )
     return eqz_imp_resp
 
 
-def gen_eqz_freq_resp(sig: DistortedSig = DistortedSig.DC):
+def gen_eqz_freq_resp(sig: DistortedSig = DistortedSig.DC, n_taps=9):
     """Return the 256-bin FFT of the equalizer impulse response."""
-    eqz_imp_resp = gen_eqz_imp_resp(sig=sig)
+    eqz_imp_resp = gen_eqz_imp_resp(sig=sig, n_taps=n_taps)
     return np.fft.fft(a=np.array(eqz_imp_resp), n=256)
 
 

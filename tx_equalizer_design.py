@@ -148,6 +148,7 @@ class TxEqzDesByChirp(TxEqualizerDesign):
         max_samples: int = 4000,
         resample_meas: bool = True,
         print_en=False,
+        n_taps=9
     ):
         signal_analyzer_output = np.load(file_path)
         data = (
@@ -156,7 +157,7 @@ class TxEqzDesByChirp(TxEqualizerDesign):
             else signal_analyzer_output[0:max_samples]
         )
         unwanted_signal = self.proc_meas_to_train(data, resample_meas=resample_meas)
-        coef = self.train_coef(unwanted_signal=unwanted_signal, n_taps=9).conj()
+        coef = self.train_coef(unwanted_signal=unwanted_signal, n_taps=n_taps).conj()
         norm_factor = self.__gen_norm_factor(coef)
         coef /= norm_factor
         if print_en:
