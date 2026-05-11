@@ -1,0 +1,94 @@
+\documentclass[11pt, a4paper]{article}
+
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage[hidelinks]{hyperref}
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+
+\title{Equalizer Lowpass FIR Filter Design via Convex Optimisation}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Overview}
+
+A complex-valued lowpass FIR filter is designed whose passband target matches
+the UCDC equalizer frequency response.  The filter is found by solving a
+second-order cone programme (SOCP) using CVXPY.
+
+\subsection*{Signal chain parameters}
+
+\input{params}
+
+\section{Optimisation Formulation}
+
+The DTFT of the complex tap vector $\mathbf{h} \in \mathbf{C}^N$ is
+\[
+  H(\omega) = \sum_{n=0}^{N-1} h[n]\, e^{-j\omega n}
+  = \mathbf{a}(\omega)^\top \mathbf{h},
+  \quad
+  \mathbf{a}(\omega) = \bigl[1,\, e^{-j\omega},\, \ldots,\, e^{-j\omega(N-1)}\bigr]^\top.
+\]
+
+Sampling over a frequency grid turns this into the linear map
+$\mathbf{H} = \mathbf{A}\mathbf{h}$, where
+$A_{kn} = e^{-j\omega_k n}$.
+
+Let $\mathcal{P}$, $\mathcal{S}$, and $\mathcal{T}$ denote the index sets of
+the passband, stopband, and transition-band frequency grid points,
+respectively.
+The \textbf{fixed-tolerance} problem is
+\begin{align}
+  \underset{\mathbf{h}}{\text{minimise}} \quad
+    & \sum_{k\in\mathcal{P}} \lvert \mathbf{a}(\omega_k)^\top \mathbf{h} - H_d(\omega_k) \rvert
+      + \lambda \lVert \mathbf{h} \rVert^2 \notag \\
+  \text{subject to} \quad
+    & \lvert \mathbf{a}(\omega_k)^\top \mathbf{h} - H_d(\omega_k) \rvert \leq \delta_p,
+      \quad k \in \mathcal{P} \notag \\
+    & \lvert \mathbf{a}(\omega_k)^\top \mathbf{h} \rvert \leq \delta_s,
+      \quad k \in \mathcal{S} \notag \\
+    & \lvert \mathbf{a}(\omega_k)^\top \mathbf{h} \rvert \leq \delta_{t,k},
+      \quad k \in \mathcal{T}. \notag
+\end{align}
+
+The transition-band bound $\delta_{t,k}$ decreases linearly from
+$\max_{k\in\mathcal{P}}|H_d(\omega_k)|$ at the passband edge to
+$3\delta_s$ at the stopband edge, preventing large overshoot in the
+unconstrained gap while keeping the SOCP feasible.
+
+\section{Filter Response}
+
+Figure~\ref{fig:filter_response} shows the designed filter's magnitude
+(dB) and phase response overlaid with the desired equalizer response
+$H_d(\omega)$.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{../figure/eqz_lowpass/filter_response.png}
+  \caption{Magnitude (top) and phase (bottom) of the designed equalizer
+           lowpass FIR filter.  The green shaded regions indicate the
+           passband $\pm162.5$\,MHz.  The dashed red line is the desired
+           response $H_d(\omega)$ interpolated from the 256-bin UCDC
+           equalizer FFT.}
+  \label{fig:filter_response}
+\end{figure}
+
+Figure~\ref{fig:filter_response_inband} shows the in-band magnitude response
+zoomed to $\pm5$\,MHz beyond the passband edges, with the y-axis limited to
+$[-0.9, +0.1]$\,dB to resolve the passband ripple.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{../figure/eqz_lowpass/filter_response_inband.png}
+  \caption{In-band magnitude response zoomed to
+           $[\!-167.5, +167.5]$\,MHz with a $[-0.9, +0.1]$\,dB y-axis.
+           The green shaded regions indicate the passband $\pm162.5$\,MHz.}
+  \label{fig:filter_response_inband}
+\end{figure}
+
+\end{document}

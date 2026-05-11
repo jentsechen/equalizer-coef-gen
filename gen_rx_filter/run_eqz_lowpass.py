@@ -33,6 +33,7 @@ sys.path.insert(0, _ROOT)
 sys.path.insert(0, _HERE)
 
 from gen_rx_filter import gen_eqz_freq_resp, DistortedSig
+from gen_aaf_coef import compute_responses as compute_aaf_responses
 from design_fir_cvxpy import (
     design_complex_fir_cvxpy,
     evaluate_response,
@@ -43,17 +44,52 @@ from design_fir_cvxpy import (
 
 
 # ---------------------------------------------------------------------------
+# LaTeX parameter export
+# ---------------------------------------------------------------------------
+
+def _write_params_tex(
+    path: str,
+    N: int,
+    fs_mhz: float,
+    f_pass_mhz: float,
+    f_stop_mhz: float,
+    delta_p: float,
+    delta_s: float,
+) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    nyquist = fs_mhz / 2.0
+    lines = [
+        r'\begin{tabular}{ll}',
+        r'  \toprule',
+        r'  Parameter & Value \\',
+        r'  \midrule',
+        rf'  Sample rate $f_s$ & {fs_mhz:.0f}\,MHz (two-sided, Nyquist $= \pm{nyquist:.0f}$\,MHz) \\',
+        rf'  Passband edge $f_p$ & $\pm{f_pass_mhz:.1f}$\,MHz \\',
+        rf'  Stopband edge $f_{{stop}}$ & $\pm{f_stop_mhz:.1f}$\,MHz \\',
+        rf'  Filter taps $N$ & {N} \\',
+        rf'  Passband tolerance $\delta_p$ & {delta_p} \\',
+        rf'  Stopband tolerance $\delta_s$ & {delta_s} \\',
+        r'  \bottomrule',
+        r'\end{tabular}',
+    ]
+    with open(path, 'w') as f:
+        f.write('\n'.join(lines) + '\n')
+    print(f"Saved params → {path}")
+
+
+
+# ---------------------------------------------------------------------------
 # Main design routine
 # ---------------------------------------------------------------------------
 
 def design_eqz_lowpass(
-    N: int = 127,
+    N: int = 63,
     fs_mhz: float = 750.0,
     f_pass_mhz: float = 162.5,
     f_stop_mhz: float = 250.0,
     mode: str = 'fixed',
-    delta_p: float = 0.02,
-    delta_s: float = 0.05,
+    delta_p: float = 0.05,
+    delta_s: float = 0.10,
     lambda_reg: float = 1e-3,
     n_grid: int = 512,
     solver: str = None,
@@ -82,6 +118,12 @@ def design_eqz_lowpass(
     eqz_resp = gen_eqz_freq_resp(sig=DistortedSig.UCDC, n_taps=4)
     # eqz_resp[k] corresponds to physical frequency  k * fs_mhz/256  MHz
     # (standard two-sided FFT order: DC, positive, then negative bins)
+
+    # Normalise by DC so the desired response has unity gain at 0 Hz.
+    # This makes delta_p and delta_s directly interpretable as fractions of
+    # the passband gain and keeps |Hd| well-conditioned near 1.
+    dc_gain = eqz_resp[0]
+    eqz_resp = eqz_resp / dc_gain
 
     # ------------------------------------------------------------------ #
     # Step 2: build frequency grids (angular, rad/sample)                 #
@@ -115,10 +157,17 @@ def design_eqz_lowpass(
     # interp_fft_response maps 256-bin FFT → complex values at target_freqs_rad
     Hd_pb = interp_fft_response(eqz_resp, fs=fs_mhz, target_freqs_rad=pb_freqs)
 
-    # Upper bound for transition band: peak passband gain + passband tolerance
-    # + small margin, so the constraint is always strictly compatible with the
-    # passband constraint regardless of where |Hd| peaks.
-    delta_t = float(np.max(np.abs(Hd_pb))) + delta_p + 0.02
+    # Transition-band bound tapers linearly from the passband edge to the
+    # stopband edge.  The start equals the maximum passband gain + delta_p +
+    # a small margin so it is always compatible with the passband constraint.
+    # The end is 3× delta_s (not delta_s exactly) so the solver has margin
+    # at the boundary where the stopband constraint takes over.
+    delta_t_start = float(np.max(np.abs(Hd_pb)))
+    delta_t_end   = delta_s * 3.0
+    t = np.linspace(0.0, 1.0, n_grid // 2)
+    tb_bounds_pos = delta_t_start + (delta_t_end - delta_t_start) * t
+    tb_bounds_neg = tb_bounds_pos[::-1]
+    delta_t = np.concatenate([tb_bounds_neg, tb_bounds_pos])
 
     # ------------------------------------------------------------------ #
     # Step 4: solve the CVXPY SOCP                                        #
@@ -127,10 +176,11 @@ def design_eqz_lowpass(
     print(f"  fs         = {fs_mhz} MHz")
     print(f"  Passband   = ±{f_pass_mhz} MHz  (±{pb_norm:.4f} × fs)")
     print(f"  Stopband   ≥  {f_stop_mhz} MHz  ( {sb_norm:.4f} × fs)")
-    print(f"  Desired    = eqz_resp (UCDC, n_taps=4),  256-bin FFT")
+    print("  Desired    = eqz_resp (UCDC, n_taps=4),  256-bin FFT,  DC-normalised")
+    print(f"  DC gain removed: |{np.abs(dc_gain):.6f}|  ∠{np.degrees(np.angle(dc_gain)):.2f}°")
     if mode == 'fixed':
         print(f"  delta_p    = {delta_p}  (passband),  delta_s = {delta_s}  (stopband)")
-    print(f"  delta_t    = {delta_t:.3f}  (transition band upper bound)")
+    print(f"  delta_t    = {delta_t_start:.3f} → {delta_t_end:.3f}  (transition band, linear taper)")
     print(f"  lambda_reg = {lambda_reg}  (tap-energy regularisation)")
 
     h = design_complex_fir_cvxpy(
@@ -153,14 +203,20 @@ def design_eqz_lowpass(
     # ------------------------------------------------------------------ #
     H_pb  = evaluate_response(h, pb_freqs)
     H_sb  = evaluate_response(h, sb_freqs)
-    pb_err = np.max(np.abs(H_pb - Hd_pb))
+    err_pb = H_pb - Hd_pb
+    pb_err_peak = np.max(np.abs(err_pb))
+    pb_err_rms  = np.sqrt(np.mean(np.abs(err_pb) ** 2))
     sb_pk  = np.max(np.abs(H_sb))
-    print(f"\n  Passband peak |H - Hd| : {pb_err:.5f}")
+    print(f"\n  In-band peak  |H - Hd| : {pb_err_peak:.5f}  ({20*np.log10(pb_err_peak+1e-12):.1f} dB)")
+    print(f"  In-band RMS   |H - Hd| : {pb_err_rms:.5f}  ({20*np.log10(pb_err_rms +1e-12):.1f} dB)")
     print(f"  Stopband peak |H|      : {sb_pk:.5f}  ({20*np.log10(sb_pk+1e-12):.1f} dB)")
 
     # ------------------------------------------------------------------ #
     # Step 6: save and plot                                               #
     # ------------------------------------------------------------------ #
+    _, _, H_combined, hc_freq_axis = compute_aaf_responses(f_pass_mhz=f_pass_mhz, fs_mhz=fs_mhz)
+    H_combined = H_combined / H_combined[len(H_combined) // 2]  # DC-normalise for comparison
+
     save_coefficients(h, out_dir=out_dir, name='eqz_lowpass')
     plot_response(
         h, fs=fs_mhz, out_dir=out_dir,
@@ -169,6 +225,13 @@ def design_eqz_lowpass(
         freq_unit='MHz',
         Hd_freqs_rad=pb_freqs,
         Hd=Hd_pb,
+        Hc_freqs_mhz=hc_freq_axis,
+        Hc=H_combined,
+    )
+    _write_params_tex(
+        path=os.path.join(_HERE, 'document', 'params.tex'),
+        N=N, fs_mhz=fs_mhz, f_pass_mhz=f_pass_mhz, f_stop_mhz=f_stop_mhz,
+        delta_p=delta_p, delta_s=delta_s,
     )
     return h
 
@@ -182,7 +245,7 @@ def _build_parser() -> argparse.ArgumentParser:
         description='Design a complex lowpass FIR matched to the UCDC equalizer response.',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    p.add_argument('--N',          type=int,   default=127,
+    p.add_argument('--N',          type=int,   default=63,
                    help='Number of filter taps')
     p.add_argument('--fs',         type=float, default=750.0,
                    help='Sample rate in MHz')
@@ -192,13 +255,13 @@ def _build_parser() -> argparse.ArgumentParser:
                    help='Stopband start frequency in MHz')
     p.add_argument('--mode',       choices=['minimax', 'fixed'], default='fixed',
                    help='Optimisation mode')
-    p.add_argument('--delta-p',    type=float, default=0.02,
+    p.add_argument('--delta-p',    type=float, default=0.05,
                    help='Passband error tolerance (fixed mode)')
-    p.add_argument('--delta-s',    type=float, default=0.05,
-                   help='Stopband attenuation tolerance (fixed mode)')
+    p.add_argument('--delta-s',    type=float, default=0.10,
+                   help='Stopband attenuation tolerance (fixed mode); 0.10 ≈ -20 dB')
     p.add_argument('--lambda-reg', type=float, default=1e-3,
                    help='L2 tap-energy regularisation weight; suppresses transition-band spikes')
-    p.add_argument('--n-grid',     type=int,   default=512,
+    p.add_argument('--n-grid',     type=int,   default=256,
                    help='Frequency grid points per band')
     p.add_argument('--solver',     type=str,   default=None,
                    help='CVXPY solver (SCS, CLARABEL, …). Default: auto')

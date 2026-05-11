@@ -26,7 +26,7 @@ class FilterDesign:
     f_pass_mhz: float = 100.0
     f_stop_mhz: float = 0.0
     Apass_dB: float = 0.05
-    Astop_dB: float = 50
+    Astop_dB: float = 25
     n_taps: int = 65
     response: np.ndarray = None
 
@@ -153,7 +153,7 @@ def aaf_coef_gen(f_pass_mhz=325,
             f_pass_mhz=f_pass_mhz,
             f_stop_mhz=f_stop_mhz,
             Apass_dB=0.02,
-            Astop_dB=60,
+            Astop_dB=25,
             n_taps=n_tapsAAF).response
     return aaf_coef
 

@@ -95,8 +95,10 @@ def design_complex_fir_cvxpy(
             band, shape (Kt,). When provided, an upper-magnitude constraint
             |A_tb @ h| ≤ delta_t is added, preventing overshoot in the gap
             between passband and stopband.
-        delta_t: Upper magnitude bound for the transition band (default 1.0,
-            i.e. no gain above the passband level).  Ignored when
+        delta_t: Upper magnitude bound for the transition band.  Scalar for a
+            flat cap, or ndarray of the same length as transition_freqs for a
+            per-frequency bound (e.g. a taper from the passband edge value
+            down to near delta_s at the stopband edge).  Ignored when
             transition_freqs is None.
         solver: CVXPY solver name (e.g. 'CLARABEL', 'SCS'). None → auto-select.
         verbose: Forward verbose flag to the CVXPY solver.
@@ -236,6 +238,8 @@ def plot_response(
     freq_unit: str = 'Hz',
     Hd_freqs_rad: Optional[np.ndarray] = None,
     Hd: Optional[np.ndarray] = None,
+    Hc_freqs_mhz: Optional[np.ndarray] = None,
+    Hc: Optional[np.ndarray] = None,
 ) -> None:
     """Plot magnitude (dB) and phase responses and save to PNG and interactive HTML.
 
@@ -276,30 +280,29 @@ def plot_response(
         hd_mag_db     = 20 * np.log10(np.abs(Hd) + 1e-12)
         hd_phase_deg  = np.degrees(np.unwrap(np.angle(Hd)))
 
-    # --- matplotlib PNG ---
-    fig, axes = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
-    fig.suptitle(title, fontsize=13)
+    hc_mag_db = hc_phase_deg = None
+    if Hc_freqs_mhz is not None and Hc is not None:
+        hc_mag_db    = 20 * np.log10(np.abs(Hc) + 1e-12)
+        hc_phase_deg = np.degrees(np.unwrap(np.angle(Hc)))
 
-    axes[0].plot(w, mag_db, lw=1.2, label='H(w) designed')
+    # --- matplotlib PNG (magnitude only) ---
+    FSIZE = 20
+    fig, ax = plt.subplots(figsize=(12, 5))
+
     if hd_freq_axis is not None:
-        axes[0].plot(hd_freq_axis, hd_mag_db, lw=1.5,
-                     color='crimson', label='Hd(w) desired')
-    axes[0].set_ylabel('Magnitude (dB)')
-    axes[0].grid(True, alpha=0.4)
-    axes[0].legend(fontsize=9)
+        ax.plot(hd_freq_axis, hd_mag_db, lw=2.0, label='desired resp.', zorder=2)
+    if hc_mag_db is not None:
+        ax.plot(Hc_freqs_mhz, hc_mag_db, lw=2.0, label='direct comb.', zorder=3)
+    ax.plot(w, mag_db, lw=1.5, label='cvx. opt.', zorder=4)
+    ax.set_ylabel('Magnitude (dB)', fontsize=FSIZE)
+    ax.set_xlabel(f'Frequency ({freq_unit})', fontsize=FSIZE)
+    ax.tick_params(labelsize=FSIZE)
+    ax.grid(True, alpha=0.4)
+    ax.legend(fontsize=FSIZE)
     if passband_edges is not None:
         pb_lo, pb_hi = passband_edges
         for lo, hi in [(-pb_hi * fs, -pb_lo * fs), (pb_lo * fs, pb_hi * fs)]:
-            axes[0].axvspan(lo, hi, alpha=0.10, color='green')
-
-    axes[1].plot(w, phase_deg, lw=1.2, color='tab:orange', label='H(w) designed')
-    if hd_freq_axis is not None:
-        axes[1].plot(hd_freq_axis, hd_phase_deg, lw=1.5,
-                     color='crimson', label='Hd(w) desired')
-    axes[1].set_ylabel('Phase (deg)')
-    axes[1].set_xlabel(f'Frequency ({freq_unit})')
-    axes[1].grid(True, alpha=0.4)
-    axes[1].legend(fontsize=9)
+            ax.axvspan(lo, hi, alpha=0.10, color='green')
 
     fig.tight_layout()
     png_path = os.path.join(out_dir, 'filter_response.png')
@@ -307,29 +310,60 @@ def plot_response(
     plt.close(fig)
     print(f"Saved plot → {png_path}")
 
+    # --- zoomed-in magnitude PNG (in-band) ---
+    if passband_edges is not None:
+        pb_lo, pb_hi = passband_edges
+        x_lo = -pb_hi * fs - 5
+        x_hi =  pb_hi * fs + 5
+        fig2, ax2 = plt.subplots(figsize=(12, 5))
+        if hd_freq_axis is not None:
+            ax2.plot(hd_freq_axis, hd_mag_db, lw=2.0, label='desired resp.', zorder=2)
+        if hc_mag_db is not None:
+            ax2.plot(Hc_freqs_mhz, hc_mag_db, lw=2.0, label='direct comb.', zorder=3)
+        ax2.plot(w, mag_db, lw=1.5, label='cvx. opt.', zorder=4)
+        for lo, hi in [(-pb_hi * fs, -pb_lo * fs), (pb_lo * fs, pb_hi * fs)]:
+            ax2.axvspan(lo, hi, alpha=0.10, color='green')
+        ax2.set_xlim(x_lo, x_hi)
+        ax2.set_ylim(-0.9, 0.1)
+        ax2.set_ylabel('Magnitude (dB)', fontsize=FSIZE)
+        ax2.set_xlabel(f'Frequency ({freq_unit})', fontsize=FSIZE)
+        ax2.tick_params(labelsize=FSIZE)
+        ax2.grid(True, alpha=0.4)
+        ax2.legend(fontsize=FSIZE)
+        fig2.tight_layout()
+        zoom_path = os.path.join(out_dir, 'filter_response_inband.png')
+        fig2.savefig(zoom_path, dpi=150)
+        plt.close(fig2)
+        print(f"Saved zoomed plot → {zoom_path}")
+
     # --- Plotly interactive HTML ---
     pfig = make_subplots(
         rows=2, cols=1, shared_xaxes=True,
-        subplot_titles=('Magnitude (dB)', 'Phase (deg)'),
-        vertical_spacing=0.08,
+        vertical_spacing=0.12,
     )
-    pfig.add_trace(go.Scatter(x=w.tolist(), y=mag_db.tolist(),
-                              name='H(w) designed', line=dict(width=1.2)),
-                   row=1, col=1)
-    pfig.add_trace(go.Scatter(x=w.tolist(), y=phase_deg.tolist(),
-                              name='H(w) designed', line=dict(width=1.2, color='darkorange'),
-                              showlegend=False),
-                   row=2, col=1)
     if hd_freq_axis is not None:
         pfig.add_trace(go.Scatter(x=hd_freq_axis.tolist(), y=hd_mag_db.tolist(),
-                                  name='Hd(w) desired',
-                                  line=dict(width=1.8, color='crimson')),
+                                  name='desired resp.', line=dict(width=2.0)),
                        row=1, col=1)
         pfig.add_trace(go.Scatter(x=hd_freq_axis.tolist(), y=hd_phase_deg.tolist(),
-                                  name='Hd(w) desired',
-                                  line=dict(width=1.8, color='crimson'),
+                                  name='desired resp.', line=dict(width=2.0),
                                   showlegend=False),
                        row=2, col=1)
+    if hc_mag_db is not None:
+        pfig.add_trace(go.Scatter(x=Hc_freqs_mhz.tolist(), y=hc_mag_db.tolist(),
+                                  name='direct comb.', line=dict(width=2.0)),
+                       row=1, col=1)
+        pfig.add_trace(go.Scatter(x=Hc_freqs_mhz.tolist(), y=hc_phase_deg.tolist(),
+                                  name='direct comb.', line=dict(width=2.0),
+                                  showlegend=False),
+                       row=2, col=1)
+    pfig.add_trace(go.Scatter(x=w.tolist(), y=mag_db.tolist(),
+                              name='cvx. opt.', line=dict(width=1.5)),
+                   row=1, col=1)
+    pfig.add_trace(go.Scatter(x=w.tolist(), y=phase_deg.tolist(),
+                              name='cvx. opt.', line=dict(width=1.5),
+                              showlegend=False),
+                   row=2, col=1)
 
     if passband_edges is not None:
         pb_lo, pb_hi = passband_edges
@@ -338,8 +372,13 @@ def plot_response(
                 pfig.add_vrect(x0=lo, x1=hi, fillcolor='green', opacity=0.10,
                                line_width=0, row=row, col=1)
 
-    pfig.update_xaxes(title_text=f'Frequency ({freq_unit})', row=2, col=1)
-    pfig.update_layout(title_text=title, hovermode='x unified')
+    freq_label = f'Frequency ({freq_unit})'
+    pfig.update_xaxes(title_text=freq_label, title_font=dict(size=FSIZE),
+                      tickfont=dict(size=FSIZE))
+    pfig.update_yaxes(title_font=dict(size=FSIZE), tickfont=dict(size=FSIZE))
+    pfig.update_yaxes(title_text='Magnitude (dB)', row=1, col=1)
+    pfig.update_yaxes(title_text='Phase (degree)', row=2, col=1)
+    pfig.update_layout(hovermode='x unified', font=dict(size=FSIZE))
     html_path = os.path.join(out_dir, 'filter_response.html')
     pfig.write_html(html_path)
     print(f"Saved interactive plot → {html_path}")
