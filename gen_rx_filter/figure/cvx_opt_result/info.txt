@@ -1,0 +1,1 @@
+EQZ Lowpass FIR  N=127  ±162.5 MHz  mode=fixed
