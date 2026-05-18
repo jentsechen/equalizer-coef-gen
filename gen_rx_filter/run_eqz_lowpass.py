@@ -92,6 +92,7 @@ def design_eqz_lowpass(
     delta_s: float = 0.10,
     lambda_reg: float = 1e-3,
     n_grid: int = 512,
+    use_transition_band: bool = True,
     solver: str = None,
     out_dir: str = 'gen_rx_filter/figure/eqz_lowpass',
     verbose: bool = False,
@@ -105,6 +106,10 @@ def design_eqz_lowpass(
         f_stop_mhz: Stopband start frequency in MHz.
         mode: 'minimax' or 'fixed'.
         n_grid: Number of frequency grid points per band.
+        use_transition_band: When True (default), add a linearly-tapered
+            upper-magnitude constraint over the transition band to suppress
+            overshoot in the gap.  When False, the transition band is left
+            unconstrained (the solver may spike there freely).
         solver: CVXPY solver name (None → auto).
         out_dir: Output directory for saved files.
         verbose: Show solver output.
@@ -143,31 +148,35 @@ def design_eqz_lowpass(
     sb_freqs_neg = np.linspace(-0.5,   -sb_norm, n_grid) * 2 * np.pi
     sb_freqs = np.concatenate([sb_freqs_neg, sb_freqs_pos])
 
-    # Transition band: both sides between passband and stopband edges.
-    # Start one grid step inside the passband edge to avoid overlapping the
-    # passband constraint at exactly pb_norm.
-    tb_step = (sb_norm - pb_norm) / (n_grid // 2)
-    tb_freqs_pos = np.linspace(pb_norm + tb_step, sb_norm, n_grid // 2) * 2 * np.pi
-    tb_freqs_neg = np.linspace(-sb_norm, -pb_norm - tb_step, n_grid // 2) * 2 * np.pi
-    tb_freqs = np.concatenate([tb_freqs_neg, tb_freqs_pos])
-
     # ------------------------------------------------------------------ #
     # Step 3: interpolate eqz_resp onto the passband grid                 #
     # ------------------------------------------------------------------ #
     # interp_fft_response maps 256-bin FFT → complex values at target_freqs_rad
     Hd_pb = interp_fft_response(eqz_resp, fs=fs_mhz, target_freqs_rad=pb_freqs)
 
-    # Transition-band bound tapers linearly from the passband edge to the
-    # stopband edge.  The start equals the maximum passband gain + delta_p +
-    # a small margin so it is always compatible with the passband constraint.
-    # The end is 3× delta_s (not delta_s exactly) so the solver has margin
-    # at the boundary where the stopband constraint takes over.
-    delta_t_start = float(np.max(np.abs(Hd_pb)))
-    delta_t_end   = delta_s * 3.0
-    t = np.linspace(0.0, 1.0, n_grid // 2)
-    tb_bounds_pos = delta_t_start + (delta_t_end - delta_t_start) * t
-    tb_bounds_neg = tb_bounds_pos[::-1]
-    delta_t = np.concatenate([tb_bounds_neg, tb_bounds_pos])
+    # Transition band (optional) ----------------------------------------
+    # Build a linearly-tapered upper-magnitude constraint over the gap
+    # between the passband and stopband edges.  Only constructed when
+    # use_transition_band=True; otherwise tb_freqs and delta_t stay None
+    # and the solver leaves that region unconstrained.
+    tb_freqs = None
+    delta_t  = None
+    if use_transition_band:
+        # Start one grid step inside the passband edge to avoid overlapping
+        # the passband constraint at exactly pb_norm.
+        tb_step = (sb_norm - pb_norm) / (n_grid // 2)
+        tb_freqs_pos = np.linspace(pb_norm + tb_step, sb_norm, n_grid // 2) * 2 * np.pi
+        tb_freqs_neg = np.linspace(-sb_norm, -pb_norm - tb_step, n_grid // 2) * 2 * np.pi
+        tb_freqs = np.concatenate([tb_freqs_neg, tb_freqs_pos])
+
+        # Taper from passband-peak magnitude down to 3×delta_s so the solver
+        # has room at the boundary where the stopband constraint takes over.
+        delta_t_start = float(np.max(np.abs(Hd_pb)))
+        delta_t_end   = delta_s * 3.0
+        t = np.linspace(0.0, 1.0, n_grid // 2)
+        tb_bounds_pos = delta_t_start + (delta_t_end - delta_t_start) * t
+        tb_bounds_neg = tb_bounds_pos[::-1]
+        delta_t = np.concatenate([tb_bounds_neg, tb_bounds_pos])
 
     # ------------------------------------------------------------------ #
     # Step 4: solve the CVXPY SOCP                                        #
@@ -180,7 +189,10 @@ def design_eqz_lowpass(
     print(f"  DC gain removed: |{np.abs(dc_gain):.6f}|  ∠{np.degrees(np.angle(dc_gain)):.2f}°")
     if mode == 'fixed':
         print(f"  delta_p    = {delta_p}  (passband),  delta_s = {delta_s}  (stopband)")
-    print(f"  delta_t    = {delta_t_start:.3f} → {delta_t_end:.3f}  (transition band, linear taper)")
+    if use_transition_band:
+        print(f"  delta_t    = {delta_t_start:.3f} → {delta_t_end:.3f}  (transition band, linear taper)")
+    else:
+        print("  transition band constraint: disabled (unconstrained)")
     print(f"  lambda_reg = {lambda_reg}  (tap-energy regularisation)")
 
     h = design_complex_fir_cvxpy(
@@ -263,6 +275,9 @@ def _build_parser() -> argparse.ArgumentParser:
                    help='L2 tap-energy regularisation weight; suppresses transition-band spikes')
     p.add_argument('--n-grid',     type=int,   default=256,
                    help='Frequency grid points per band')
+    p.add_argument('--no-transition-band', action='store_true',
+                   help='Disable the transition-band magnitude constraint; '
+                        'leaves the gap between passband and stopband unconstrained')
     p.add_argument('--solver',     type=str,   default=None,
                    help='CVXPY solver (SCS, CLARABEL, …). Default: auto')
     p.add_argument('--out-dir',    type=str,
@@ -285,6 +300,7 @@ if __name__ == '__main__':
         delta_s=args.delta_s,
         lambda_reg=args.lambda_reg,
         n_grid=args.n_grid,
+        use_transition_band=not args.no_transition_band,
         solver=args.solver,
         out_dir=args.out_dir,
         verbose=args.verbose,

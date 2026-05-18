@@ -91,4 +91,28 @@ $[-0.9, +0.1]$\,dB to resolve the passband ripple.
   \label{fig:filter_response_inband}
 \end{figure}
 
+\section{Comparison: CVX Fixed vs.\ Remez IRLS}
+
+Figure~\ref{fig:compare_lowpass_methods} compares the desired frequency
+response with the two lowpass FIR designs: the CVXPY fixed-tolerance solver
+(no transition-band constraint) and the complex Remez algorithm (Lawson IRLS).
+Both designs share identical passband and stopband grids and the same
+DC-normalised UCDC equalizer target.
+The top panel shows the full-band magnitude response; the bottom panel zooms
+into the passband region with the y-axis limited to $[-1, +0.2]$\,dB to
+resolve the in-band ripple.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{../figure/compare_lowpass_methods/compare_lowpass_methods.png}
+  \caption{Overlay of the desired equalizer response, the CVX fixed-tolerance
+           design, and the Remez IRLS design ($N=63$, $\pm162.5$\,MHz
+           passband, $250$\,MHz stopband).
+           Top: full-band magnitude (dB).
+           Bottom: in-band zoom with y-axis $[-1, +0.2]$\,dB.
+           The green shaded region indicates the passband; dotted red lines
+           mark the stopband edges.}
+  \label{fig:compare_lowpass_methods}
+\end{figure}
+
 \end{document}

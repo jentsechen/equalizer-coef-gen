@@ -142,15 +142,15 @@ def design_complex_fir_cvxpy(
         ]
         objective = cp.Minimize(cp.sum(cp.abs(pb_error)) + reg)
 
+    else:
+        raise ValueError(f"Unknown mode '{mode}'. Choose 'minimax' or 'fixed'.")
+
     # Optional transition-band upper-magnitude constraint.
     # Prevents the solver exploiting the unconstrained gap between passband and
     # stopband to put large energy there while satisfying the band constraints.
     if transition_freqs is not None:
         A_tb = build_frequency_matrix(transition_freqs, N)
         constraints.append(cp.abs(A_tb @ h) <= delta_t)
-
-    else:
-        raise ValueError(f"Unknown mode '{mode}'. Choose 'minimax' or 'fixed'.")
 
     prob = cp.Problem(objective, constraints)
     solve_kwargs = {'verbose': verbose}
