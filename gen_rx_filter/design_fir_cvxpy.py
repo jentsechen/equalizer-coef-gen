@@ -240,6 +240,7 @@ def plot_response(
     Hd: Optional[np.ndarray] = None,
     Hc_freqs_mhz: Optional[np.ndarray] = None,
     Hc: Optional[np.ndarray] = None,
+    h_label: str = 'cvx. opt.',
 ) -> None:
     """Plot magnitude (dB) and phase responses and save to PNG and interactive HTML.
 
@@ -293,7 +294,7 @@ def plot_response(
         ax.plot(hd_freq_axis, hd_mag_db, lw=2.0, label='desired resp.', zorder=2)
     if hc_mag_db is not None:
         ax.plot(Hc_freqs_mhz, hc_mag_db, lw=2.0, label='direct comb.', zorder=3)
-    ax.plot(w, mag_db, lw=1.5, label='cvx. opt.', zorder=4)
+    ax.plot(w, mag_db, lw=1.5, label=h_label, zorder=4)
     ax.set_ylabel('Magnitude (dB)', fontsize=FSIZE)
     ax.set_xlabel(f'Frequency ({freq_unit})', fontsize=FSIZE)
     ax.tick_params(labelsize=FSIZE)
@@ -320,7 +321,7 @@ def plot_response(
             ax2.plot(hd_freq_axis, hd_mag_db, lw=2.0, label='desired resp.', zorder=2)
         if hc_mag_db is not None:
             ax2.plot(Hc_freqs_mhz, hc_mag_db, lw=2.0, label='direct comb.', zorder=3)
-        ax2.plot(w, mag_db, lw=1.5, label='cvx. opt.', zorder=4)
+        ax2.plot(w, mag_db, lw=1.5, label=h_label, zorder=4)
         for lo, hi in [(-pb_hi * fs, -pb_lo * fs), (pb_lo * fs, pb_hi * fs)]:
             ax2.axvspan(lo, hi, alpha=0.10, color='green')
         ax2.set_xlim(x_lo, x_hi)
@@ -358,10 +359,10 @@ def plot_response(
                                   showlegend=False),
                        row=2, col=1)
     pfig.add_trace(go.Scatter(x=w.tolist(), y=mag_db.tolist(),
-                              name='cvx. opt.', line=dict(width=1.5)),
+                              name=h_label, line=dict(width=1.5)),
                    row=1, col=1)
     pfig.add_trace(go.Scatter(x=w.tolist(), y=phase_deg.tolist(),
-                              name='cvx. opt.', line=dict(width=1.5),
+                              name=h_label, line=dict(width=1.5),
                               showlegend=False),
                    row=2, col=1)
 

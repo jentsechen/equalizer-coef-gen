@@ -50,7 +50,9 @@ import os
 import sys
 from typing import Optional, Union
 
+import matplotlib.pyplot as plt
 import numpy as np
+import plotly.graph_objects as go
 from scipy.linalg import lstsq as scipy_lstsq
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -80,6 +82,7 @@ def design_complex_fir_remez(
     Hd_passband: np.ndarray,
     sb_weight: float = 1.0,
     transition_freqs: Optional[np.ndarray] = None,
+    Hd_transition: Optional[np.ndarray] = None,
     delta_t: Union[float, np.ndarray] = 1.0,
     n_iter: int = 150,
     tol: float = 1e-6,
@@ -110,11 +113,12 @@ def design_complex_fir_remez(
             tolerances so that peak_pb_err ≈ delta_p and peak_sb ≈ delta_s
             at convergence.
         transition_freqs: Optional angular frequencies in the transition band.
-            Desired response is 0; a tapered upper bound is encoded through
-            per-point weights derived from delta_t.
-        delta_t: Upper magnitude bound for the transition band.  Scalar for a
-            flat cap, or ndarray of length K_tb for a per-point bound.  A
-            tighter (smaller) bound produces a larger per-point weight.
+        Hd_transition: Desired magnitude response at transition_freqs (real,
+            positive).  When provided, the solver tracks this ramp directly
+            with weight sb_weight.  When None, falls back to a zero-desired /
+            tapered-weight upper-bound encoded via delta_t.
+        delta_t: Upper magnitude bound used only when Hd_transition is None.
+            Scalar or ndarray of length K_tb; tighter bound → larger weight.
         n_iter: Maximum Lawson iterations.
         tol: Convergence threshold: stop when the relative change in the
             combined peak error falls below this value.
@@ -134,7 +138,10 @@ def design_complex_fir_remez(
     if transition_freqs is not None:
         K_tb = len(transition_freqs)
         freq_parts.append(transition_freqs)
-        Hd_parts.append(np.zeros(K_tb, dtype=complex))
+        if Hd_transition is not None:
+            Hd_parts.append(Hd_transition.astype(complex))
+        else:
+            Hd_parts.append(np.zeros(K_tb, dtype=complex))
 
     all_freqs = np.concatenate(freq_parts)   # (K,)
     Hd_all    = np.concatenate(Hd_parts)     # (K,)
@@ -144,12 +151,15 @@ def design_complex_fir_remez(
     B = np.ones(K)
     B[K_pb : K_pb + K_sb] = sb_weight
     if K_tb > 0:
-        dt = np.atleast_1d(delta_t)
-        if dt.size == 1:
-            dt = np.full(K_tb, float(dt[0]))
-        dt = np.maximum(dt, 1e-9)           # guard against zero
-        # Tighter bound → larger weight (transition region treated as soft stopband)
-        B[K_pb + K_sb :] = sb_weight / dt
+        if Hd_transition is not None:
+            # Desired ramp provided: weight uniformly at sb_weight
+            B[K_pb + K_sb :] = sb_weight
+        else:
+            dt = np.atleast_1d(delta_t)
+            if dt.size == 1:
+                dt = np.full(K_tb, float(dt[0]))
+            dt = np.maximum(dt, 1e-9)
+            B[K_pb + K_sb :] = sb_weight / dt
 
     # DFT evaluation matrix  A[k, n] = exp(−j ω_k n)
     A = build_frequency_matrix(all_freqs, N)  # (K, N)
@@ -344,14 +354,17 @@ def design_eqz_lowpass_remez(
     # ------------------------------------------------------------------ #
     Hd_pb = interp_fft_response(eqz_resp, fs=fs_mhz, target_freqs_rad=pb_freqs)
 
-    # Transition-band upper bound: tapers linearly from passband peak to
-    # 3×delta_s so the solver has room at the boundary.
-    delta_t_start = float(np.max(np.abs(Hd_pb)))
-    delta_t_end   = delta_s * 3.0
-    t             = np.linspace(0.0, 1.0, n_grid // 2)
-    tb_bounds_pos = delta_t_start + (delta_t_end - delta_t_start) * t
-    tb_bounds_neg = tb_bounds_pos[::-1]
-    delta_t       = np.concatenate([tb_bounds_neg, tb_bounds_pos])
+    # Transition-band desired response: linear drop on dB scale from the
+    # passband-edge level down to delta_s at the stopband edge.
+    tb_db_start = 20 * np.log10(float(np.max(np.abs(Hd_pb))) + 1e-12)
+    tb_db_end   = 20 * np.log10(delta_s + 1e-12)
+    t           = np.linspace(0.0, 1.0, n_grid // 2)
+    tb_db_pos   = tb_db_start + (tb_db_end - tb_db_start) * t   # passband → stopband
+    tb_db_neg   = tb_db_pos[::-1]                                # stopband → passband
+    tb_desired  = np.concatenate([
+        10 ** (tb_db_neg / 20),
+        10 ** (tb_db_pos / 20),
+    ])
 
     # ------------------------------------------------------------------ #
     # Step 4: run complex Remez (Lawson IRLS)                            #
@@ -368,22 +381,23 @@ def design_eqz_lowpass_remez(
     print(f"  DC gain removed: |{np.abs(dc_gain):.6f}|  ∠{np.degrees(np.angle(dc_gain)):.2f}°")
     print(f"  delta_p     = {delta_p}  (passband),  delta_s = {delta_s}  (stopband)")
     print(f"  sb_weight   = delta_p/delta_s = {sb_weight:.4f}")
-    print("  transition  = unconstrained (Remez handles rolloff organically)")
+    print(f"  transition  = dB-linear ramp  [{tb_db_start:.2f} → {tb_db_end:.2f} dB]  "
+          f"({len(tb_freqs)} pts)")
     print(f"  max_iter    = {n_iter}")
 
-    # Note: transition_freqs are intentionally NOT passed here.
-    # Unlike the CVXPY solver (which needs an explicit upper-bound constraint to
-    # prevent the unconstrained gap from spiking), the Remez minimax objective
-    # naturally leaves the transition band unconstrained – the filter rolls off
-    # organically between the passband and stopband.  Encoding the taper as soft
-    # weights inflates the transition-band weight near the stopband edge above
-    # the passband weight, which hurts in-band fitting with no benefit.
+    # _tb_freqs = None        # set to tb_freqs to include transition band in solver
+    # _Hd_transition = None   # set to tb_desired to use ramp desired response
+    _tb_freqs = tb_freqs        # set to tb_freqs to include transition band in solver
+    _Hd_transition = tb_desired   # set to tb_desired to use ramp desired response
+
     h = design_complex_fir_remez(
         N=N,
         passband_freqs=pb_freqs,
         stopband_freqs=sb_freqs,
         Hd_passband=Hd_pb,
         sb_weight=sb_weight,
+        transition_freqs=_tb_freqs,
+        Hd_transition=_Hd_transition,
         n_iter=n_iter,
         verbose=verbose,
     )
@@ -404,10 +418,23 @@ def design_eqz_lowpass_remez(
     # ------------------------------------------------------------------ #
     # Step 6: save and plot                                               #
     # ------------------------------------------------------------------ #
-    _, _, H_combined, hc_freq_axis = compute_aaf_responses(
+    _, H_eqz, H_combined, hc_freq_axis = compute_aaf_responses(
         f_pass_mhz=f_pass_mhz, fs_mhz=fs_mhz
     )
-    H_combined = H_combined / H_combined[len(H_combined) // 2]
+    dc_idx     = len(H_eqz) // 2
+    H_eqz      = H_eqz     / H_eqz[dc_idx]
+    H_combined = H_combined / H_combined[dc_idx]
+
+    # Build desired-response arrays for plotting: include transition band when provided
+    if _Hd_transition is not None and _tb_freqs is not None:
+        _all_Hd_freqs = np.concatenate([pb_freqs, _tb_freqs])
+        _all_Hd = np.concatenate([Hd_pb, _Hd_transition.astype(complex)])
+        _sort = np.argsort(_all_Hd_freqs)
+        Hd_freqs_plot = _all_Hd_freqs[_sort]
+        Hd_plot = _all_Hd[_sort]
+    else:
+        Hd_freqs_plot = pb_freqs
+        Hd_plot = Hd_pb
 
     save_coefficients(h, out_dir=out_dir, name='eqz_lowpass_remez')
     plot_response(
@@ -415,11 +442,63 @@ def design_eqz_lowpass_remez(
         title=f'EQZ Lowpass FIR (Remez)  N={N}  ±{f_pass_mhz} MHz',
         passband_edges=(0.0, pb_norm),
         freq_unit='MHz',
-        Hd_freqs_rad=pb_freqs,
-        Hd=Hd_pb,
+        Hd_freqs_rad=Hd_freqs_plot,
+        Hd=Hd_plot,
         Hc_freqs_mhz=hc_freq_axis,
         Hc=H_combined,
+        h_label='complex remez',
     )
+
+    # ---- In-band error figure -------------------------------------------
+    # Error metric: |mag_dB(H) − mag_dB(H_eqz)| inside the passband,
+    # same definition as gen_aaf_coef.plot_inband_error.
+    pb_mask  = np.abs(hc_freq_axis) <= f_pass_mhz
+    freq_pb  = hc_freq_axis[pb_mask]
+    ref_db   = 20 * np.log10(np.abs(H_eqz[pb_mask])      + 1e-12)
+
+    # Evaluate the designed filter on the same AAF grid (hc_freq_axis in MHz)
+    hc_freqs_rad = hc_freq_axis / fs_mhz * 2 * np.pi
+    H_rmz_hc     = evaluate_response(h, hc_freqs_rad)
+    H_rmz_hc     = H_rmz_hc / H_rmz_hc[dc_idx]
+
+    def _err_db(H):
+        return np.abs(20 * np.log10(np.abs(H[pb_mask]) + 1e-12) - ref_db)
+
+    FSIZE = 20
+    curves = [
+        (_err_db(H_combined), 'direct combine'),
+        (_err_db(H_rmz_hc),   'complex remez'),
+    ]
+
+    # matplotlib PNG
+    fig, ax = plt.subplots(figsize=(12, 5))
+    for err, label in curves:
+        ax.plot(freq_pb, err, lw=2.0, label=label)
+    ax.set_xlabel('Frequency (MHz)', fontsize=FSIZE)
+    ax.set_ylabel('Magnitude error (dB)', fontsize=FSIZE)
+    ax.tick_params(labelsize=FSIZE)
+    ax.legend(fontsize=FSIZE)
+    ax.grid(True, alpha=0.4)
+    fig.tight_layout()
+    err_png = os.path.join(out_dir, 'inband_error.png')
+    fig.savefig(err_png, dpi=150)
+    plt.close(fig)
+    print(f"Saved in-band error plot → {err_png}")
+
+    # Plotly interactive HTML
+    pfig = go.Figure()
+    for err, label in curves:
+        pfig.add_trace(go.Scatter(x=freq_pb.tolist(), y=err.tolist(),
+                                  name=label, line=dict(width=2)))
+    pfig.update_layout(
+        xaxis_title='Frequency (MHz)',
+        yaxis_title='Magnitude error (dB)',
+        hovermode='x unified',
+        font=dict(size=FSIZE),
+    )
+    err_html = os.path.join(out_dir, 'inband_error.html')
+    pfig.write_html(err_html)
+    print(f"Saved in-band error HTML  → {err_html}")
     _write_params_tex(
         path=os.path.join(_HERE, 'document', 'params_remez.tex'),
         N=N, fs_mhz=fs_mhz, f_pass_mhz=f_pass_mhz, f_stop_mhz=f_stop_mhz,
@@ -447,7 +526,7 @@ def _build_parser() -> argparse.ArgumentParser:
                    help='Stopband start frequency in MHz')
     p.add_argument('--delta-p',  type=float, default=0.05,
                    help='Passband ripple tolerance (sets sb_weight = delta_p/delta_s)')
-    p.add_argument('--delta-s',  type=float, default=0.1,
+    p.add_argument('--delta-s',  type=float, default=0.1, # 0.1
                    help='Stopband attenuation tolerance')
     p.add_argument('--n-iter',   type=int,   default=150,
                    help='Maximum Lawson iterations')

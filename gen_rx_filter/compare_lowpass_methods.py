@@ -125,9 +125,26 @@ def run_comparison(
         verbose=verbose,
     )
 
-    # ---- Remez (Lawson IRLS, transition band unconstrained) --------------
+    # ---- Remez (Lawson IRLS) – two-pass stopband calibration -------------
+    # Pass 1: initial weight ratio sets the equiripple balance.
     sb_weight = delta_p / delta_s
-    print(f"[2/2] Remez Lawson IRLS  N={N}  sb_weight={sb_weight:.3f}")
+    print(f"[2/2] Remez Lawson IRLS  N={N}  pass 1  sb_weight={sb_weight:.3f}")
+    h_rmz = design_complex_fir_remez(
+        N=N,
+        passband_freqs=pb_freqs,
+        stopband_freqs=sb_freqs,
+        Hd_passband=Hd_pb,
+        sb_weight=sb_weight,
+        n_iter=n_iter_remez,
+        verbose=verbose,
+    )
+    # The equiripple condition gives sb_peak ≈ pb_peak / sb_weight, where
+    # pb_peak (δ*) is set by N — not by delta_p.  Recalibrate sb_weight
+    # using the measured pb_peak so pass 2 lands sb_peak ≈ delta_s.
+    pb_achieved = float(np.max(np.abs(evaluate_response(h_rmz, pb_freqs) - Hd_pb)))
+    sb_weight = pb_achieved / delta_s
+    print(f"           pass 2  pb_achieved={pb_achieved:.5f}  "
+          f"sb_weight_corrected={sb_weight:.3f}")
     h_rmz = design_complex_fir_remez(
         N=N,
         passband_freqs=pb_freqs,
