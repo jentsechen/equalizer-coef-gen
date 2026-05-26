@@ -204,8 +204,8 @@ def design_eqz_lowpass(
         delta_p=delta_p,
         delta_s=delta_s,
         lambda_reg=lambda_reg,
-        transition_freqs=tb_freqs,
-        delta_t=delta_t,
+        # transition_freqs=tb_freqs,
+        # delta_t=delta_t,
         solver=solver,
         verbose=verbose,
     )

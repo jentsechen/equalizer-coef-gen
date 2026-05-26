@@ -91,28 +91,59 @@ $[-0.9, +0.1]$\,dB to resolve the passband ripple.
   \label{fig:filter_response_inband}
 \end{figure}
 
-\section{Comparison: CVX Fixed vs.\ Remez IRLS}
+\section{Complex Remez Algorithm}
 
-Figure~\ref{fig:compare_lowpass_methods} compares the desired frequency
-response with the two lowpass FIR designs: the CVXPY fixed-tolerance solver
-(no transition-band constraint) and the complex Remez algorithm (Lawson IRLS).
-Both designs share identical passband and stopband grids and the same
-DC-normalised UCDC equalizer target.
-The top panel shows the full-band magnitude response; the bottom panel zooms
-into the passband region with the y-axis limited to $[-1, +0.2]$\,dB to
-resolve the in-band ripple.
+The complex Remez algorithm (also known as Lawson's iteratively reweighted
+least-squares, IRLS) extends the classical Parks--McClellan algorithm to
+complex-valued FIR filters.  At each iteration the algorithm solves a
+weighted least-squares problem
+\[
+  \min_{\mathbf{h}} \sum_k w_k(\ell)\,
+    \bigl\lvert \mathbf{a}(\omega_k)^\top \mathbf{h} - H_d(\omega_k) \bigr\rvert^2,
+\]
+and then updates the weights as
+$w_k(\ell+1) = w_k(\ell)\,\lvert e_k(\ell) \rvert$,
+where $e_k(\ell)$ is the error at frequency $\omega_k$ after iteration
+$\ell$.  This reweighting progressively concentrates the design effort on
+the worst-case frequency points, driving the solution toward the
+minimax (Chebyshev) optimum.
+
+Unlike the convex optimisation approach, no explicit passband or stopband
+tolerance parameters are required; the algorithm converges to the
+equi-ripple solution determined solely by the frequency grid and the
+desired response $H_d(\omega)$.
+
+Figure~\ref{fig:complex_remez_response} shows the full-band magnitude and
+phase response of the filter designed with the complex Remez algorithm.
+Figure~\ref{fig:complex_remez_inband} zooms into the passband region, and
+Figure~\ref{fig:complex_remez_error} shows the in-band approximation error.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=\linewidth]{../figure/compare_lowpass_methods/compare_lowpass_methods.png}
-  \caption{Overlay of the desired equalizer response, the CVX fixed-tolerance
-           design, and the Remez IRLS design ($N=63$, $\pm162.5$\,MHz
-           passband, $250$\,MHz stopband).
-           Top: full-band magnitude (dB).
-           Bottom: in-band zoom with y-axis $[-1, +0.2]$\,dB.
-           The green shaded region indicates the passband; dotted red lines
-           mark the stopband edges.}
-  \label{fig:compare_lowpass_methods}
+  \includegraphics[width=\linewidth]{../figure/complex_remez_result/no_tb_constraint/filter_response.png}
+  \caption{Full-band magnitude (top) and phase (bottom) of the complex
+           Remez FIR filter.  The green shaded region indicates the
+           passband $\pm162.5$\,MHz.  The dashed red line is the desired
+           response $H_d(\omega)$.}
+  \label{fig:complex_remez_response}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{../figure/complex_remez_result/no_tb_constraint/filter_response_inband.png}
+  \caption{In-band magnitude response of the complex Remez filter zoomed
+           to the passband region.  The green shaded region indicates the
+           passband $\pm162.5$\,MHz.}
+  \label{fig:complex_remez_inband}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{../figure/complex_remez_result/no_tb_constraint/inband_error.png}
+  \caption{In-band approximation error of the complex Remez filter.
+           The equi-ripple characteristic of the Chebyshev solution is
+           visible across the passband.}
+  \label{fig:complex_remez_error}
 \end{figure}
 
 \end{document}
