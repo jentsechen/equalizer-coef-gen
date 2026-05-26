@@ -152,6 +152,12 @@ def design_complex_fir_remez(
     Hd_all = np.concatenate(Hd_parts)  # (K,)
     K = len(all_freqs)
 
+    # If a transition-band magnitude ramp was provided, store it so we can
+    # do a phase-adaptive update each iteration: desired = |ramp| * exp(j*phase(H)).
+    # This makes the error purely a magnitude error, avoiding the phase-mismatch
+    # blowup that occurs when a real-valued ramp is used as a complex desired.
+    Hd_tb_mag = np.abs(Hd_all[K_pb + K_sb :]).copy() if (K_tb > 0 and Hd_transition is not None) else None
+
     # Fixed band weights B_k ─ encode relative tolerance between bands
     B = np.ones(K)
     B[K_pb : K_pb + K_sb] = sb_weight
@@ -193,6 +199,12 @@ def design_complex_fir_remez(
         Hdw = W_sqrt * Hd_all  # (K,)    pre-weighted desired
 
         h, _, _, _ = scipy_lstsq(Aw, Hdw)
+
+        # Phase-adaptive transition: align desired phase to current filter so
+        # the error reduces to a pure magnitude error |H(ω)| − ramp(ω)|.
+        if Hd_tb_mag is not None:
+            H_tb = A[K_pb + K_sb :] @ h
+            Hd_all[K_pb + K_sb :] = Hd_tb_mag * np.exp(1j * np.angle(H_tb + 1e-12))
 
         # ------------------------------------------------------------------ #
         # Error diagnostics                                                   #
@@ -366,28 +378,21 @@ def design_eqz_lowpass_remez(
     # ------------------------------------------------------------------ #
     Hd_pb = interp_fft_response(eqz_resp, fs=fs_mhz, target_freqs_rad=pb_freqs)
 
-    # Transition-band desired response: linear drop on dB scale from the
-    # passband-edge level down to delta_p at the stopband edge.
-    # Using delta_p (not delta_s) keeps the ramp always downward regardless of
-    # how large delta_s is (delta_s controls stopband weight, not ramp shape).
-    tb_db_start = 20 * np.log10(float(np.max(np.abs(Hd_pb))) + 1e-12)
-    tb_db_end = 20 * np.log10(delta_p + 1e-12)
+    # Transition-band desired magnitude: cosine taper from passband edge level
+    # down to delta_s at the stopband edge.  Zero slope at both endpoints means
+    # the ramp exerts no lateral pull on the passband or stopband constraints,
+    # giving lower in-band error than a dB-linear or linear-amplitude ramp.
+    mag_start = float(np.max(np.abs(Hd_pb)))  # ≈ 1.0 after DC normalisation
     t = np.linspace(0.0, 1.0, n_grid // 2)
-    tb_db_pos = tb_db_start + (tb_db_end - tb_db_start) * t  # passband → stopband
-    tb_db_neg = tb_db_pos[::-1]  # stopband → passband
-    tb_desired = np.concatenate(
-        [
-            10 ** (tb_db_neg / 20),
-            10 ** (tb_db_pos / 20),
-        ]
-    )
+    tb_pos = mag_start + (delta_s - mag_start) * 0.5 * (1 - np.cos(np.pi * t))
+    tb_desired = np.concatenate([tb_pos[::-1], tb_pos])
 
     # ------------------------------------------------------------------ #
     # Step 4: run complex Remez (Lawson IRLS)                            #
     # ------------------------------------------------------------------ #
     # sb_weight = delta_p/delta_s encodes the relative tolerance so that at
     # convergence: peak_pb_error ≈ delta_p and peak_sb_level ≈ delta_s.
-    sb_weight = delta_p / delta_s / 100 # to do
+    sb_weight = delta_p / delta_s
 
     print(f"Designing {N}-tap complex lowpass FIR  [complex Remez / Lawson IRLS]")
     print(f"  fs          = {fs_mhz} MHz")
@@ -400,15 +405,10 @@ def design_eqz_lowpass_remez(
     print(f"  delta_p     = {delta_p}  (passband),  delta_s = {delta_s}  (stopband)")
     print(f"  sb_weight   = delta_p/delta_s = {sb_weight:.4f}")
     print(
-        f"  transition  = dB-linear ramp  [{tb_db_start:.2f} dB → {tb_db_end:.2f} dB (delta_p)]  "
+        f"  transition  = cosine taper  [{20*np.log10(mag_start+1e-12):.2f} dB → {20*np.log10(delta_s+1e-12):.2f} dB]  "
         f"({len(tb_freqs)} pts)"
     )
     print(f"  max_iter    = {n_iter}")
-
-    _tb_freqs = None  # set to tb_freqs to include transition band in solver
-    _Hd_transition = None  # set to tb_desired to use ramp desired response
-    # _tb_freqs = tb_freqs        
-    # _Hd_transition = tb_desired   
 
     h = design_complex_fir_remez(
         N=N,
@@ -416,9 +416,9 @@ def design_eqz_lowpass_remez(
         stopband_freqs=sb_freqs,
         Hd_passband=Hd_pb,
         sb_weight=sb_weight,
-        transition_freqs=_tb_freqs,
-        Hd_transition=_Hd_transition,
-        tb_weight=0.01,
+        transition_freqs=tb_freqs,
+        Hd_transition=tb_desired,
+        tb_weight=0.05,
         n_iter=n_iter,
         verbose=verbose,
     )
@@ -426,21 +426,9 @@ def design_eqz_lowpass_remez(
     # ------------------------------------------------------------------ #
     # Step 5: report achieved performance                                 #
     # ------------------------------------------------------------------ #
-    H_pb = evaluate_response(h, pb_freqs)
     H_sb = evaluate_response(h, sb_freqs)
-    err_pb = H_pb - Hd_pb
-    pb_err_pk = float(np.max(np.abs(err_pb)))
-    pb_err_rm = float(np.sqrt(np.mean(np.abs(err_pb) ** 2)))
     sb_pk = float(np.max(np.abs(H_sb)))
-    print(
-        f"\n  In-band peak  |H − Hd| : {pb_err_pk:.5f}  ({20 * np.log10(pb_err_pk + 1e-12):.1f} dB)"
-    )
-    print(
-        f"  In-band RMS   |H − Hd| : {pb_err_rm:.5f}  ({20 * np.log10(pb_err_rm + 1e-12):.1f} dB)"
-    )
-    print(
-        f"  Stopband peak |H|      : {sb_pk:.5f}  ({20 * np.log10(sb_pk + 1e-12):.1f} dB)"
-    )
+    print(f"\n  Stopband peak |H| : {sb_pk:.5f}  ({20 * np.log10(sb_pk + 1e-12):.1f} dB)")
 
     # ------------------------------------------------------------------ #
     # Step 6: save and plot                                               #
@@ -452,16 +440,12 @@ def design_eqz_lowpass_remez(
     H_eqz = H_eqz / H_eqz[dc_idx]
     H_combined = H_combined / H_combined[dc_idx]
 
-    # Build desired-response arrays for plotting: include transition band when provided
-    if _Hd_transition is not None and _tb_freqs is not None:
-        _all_Hd_freqs = np.concatenate([pb_freqs, _tb_freqs])
-        _all_Hd = np.concatenate([Hd_pb, _Hd_transition.astype(complex)])
-        _sort = np.argsort(_all_Hd_freqs)
-        Hd_freqs_plot = _all_Hd_freqs[_sort]
-        Hd_plot = _all_Hd[_sort]
-    else:
-        Hd_freqs_plot = pb_freqs
-        Hd_plot = Hd_pb
+    # Build desired-response arrays for plotting: passband + transition band ramp
+    _all_Hd_freqs = np.concatenate([pb_freqs, tb_freqs])
+    _all_Hd = np.concatenate([Hd_pb, tb_desired.astype(complex)])
+    _sort = np.argsort(_all_Hd_freqs)
+    Hd_freqs_plot = _all_Hd_freqs[_sort]
+    Hd_plot = _all_Hd[_sort]
 
     save_coefficients(h, out_dir=out_dir, name="eqz_lowpass_remez")
     plot_response(
@@ -492,6 +476,13 @@ def design_eqz_lowpass_remez(
 
     def _err_db(H):
         return np.abs(20 * np.log10(np.abs(H[pb_mask]) + 1e-12) - ref_db)
+
+    rmz_err = _err_db(H_rmz_hc)
+    print(
+        f"  In-band dB magnitude error  peak : {rmz_err.max():.3f} dB"
+        f"  (at {freq_pb[np.argmax(rmz_err)]:.1f} MHz)"
+    )
+    print(f"  In-band dB magnitude error  RMS  : {rmz_err.mean():.3f} dB")
 
     FSIZE = 20
     curves = [
@@ -576,7 +567,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--delta-s",
         type=float,
-        default=10,  # 0.1
+        default=0.1,
         help="Stopband attenuation tolerance",
     )
     p.add_argument("--n-iter", type=int, default=150, help="Maximum Lawson iterations")
