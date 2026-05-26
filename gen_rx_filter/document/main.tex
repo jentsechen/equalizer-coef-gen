@@ -146,4 +146,63 @@ Figure~\ref{fig:complex_remez_error} shows the in-band approximation error.
   \label{fig:complex_remez_error}
 \end{figure}
 
+\newpage
+\subsection{Cosine Transition-Band Constraint}
+
+Without a transition-band constraint the IRLS solver leaves the gap between
+the passband and stopband entirely unconstrained, which can cause the
+magnitude to overshoot or roll off slowly in that region.  A soft constraint
+is introduced by appending a transition-band grid $\mathcal{T}$ to the
+unified frequency grid and supplying a cosine-tapered desired magnitude
+$H_d^{(\mathrm{tb})}(\omega)$ that interpolates smoothly between the
+passband-edge level and the stopband target.  Specifically, for a
+normalised parameter $t \in [0, 1]$ sweeping from the passband edge to the
+stopband edge,
+\[
+  H_d^{(\mathrm{tb})}(t)
+  = A_{\mathrm{stop}}
+    + \bigl(A_{\mathrm{pass}} - A_{\mathrm{stop}}\bigr)
+      \cdot \frac{1 + \cos(\pi t)}{2},
+\]
+where $A_{\mathrm{pass}} = \max_{k\in\mathcal{P}}|H_d(\omega_k)|$ is the
+passband-edge magnitude and $A_{\mathrm{stop}} = \delta_s$ is the stopband
+target.  This raised-cosine shape has zero derivative at both endpoints,
+giving a gentle rolloff at the passband edge and a smooth approach to the
+stopband level without abrupt kinks.  The transition-band points enter the
+IRLS cost with the same band weight as the stopband ($B_k = w_{\mathrm{sb}}$),
+so the solver tracks the ramp target directly rather than simply suppressing
+energy toward zero.
+
+Figures~\ref{fig:cosine_tb_response}--\ref{fig:cosine_tb_error} show the
+filter designed with this cosine transition-band constraint.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{../figure/complex_remez_result/cosine_tb_constraint/filter_response.png}
+  \caption{Full-band magnitude and phase of the complex Remez filter with
+           cosine transition-band constraint.  Compared with the
+           unconstrained design (Figure~\ref{fig:complex_remez_response}),
+           the transition region rolls off more smoothly between
+           $\pm162.5$\,MHz and $\pm250$\,MHz.}
+  \label{fig:cosine_tb_response}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{../figure/complex_remez_result/cosine_tb_constraint/filter_response_inband.png}
+  \caption{In-band magnitude response of the cosine-constrained Remez
+           filter zoomed to the passband region.}
+  \label{fig:cosine_tb_inband}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{../figure/complex_remez_result/cosine_tb_constraint/inband_error.png}
+  \caption{In-band approximation error of the cosine-constrained Remez
+           filter.  The additional transition-band degrees of freedom
+           redistribute the equi-ripple error across the passband relative
+           to the unconstrained result.}
+  \label{fig:cosine_tb_error}
+\end{figure}
+
 \end{document}

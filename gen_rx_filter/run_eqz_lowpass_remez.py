@@ -313,6 +313,7 @@ def design_eqz_lowpass_remez(
     fs_mhz: float = 750.0,
     f_pass_mhz: float = 162.5,
     f_stop_mhz: float = 250.0,
+    tb_gap_mhz: float = 0.0,
     delta_p: float = 0.05,
     delta_s: float = 0.10,
     n_iter: int = 150,
@@ -330,7 +331,13 @@ def design_eqz_lowpass_remez(
         N: Number of filter taps.
         fs_mhz: Sample rate in MHz.
         f_pass_mhz: Passband half-bandwidth in MHz (±f_pass_mhz).
-        f_stop_mhz: Stopband start frequency in MHz.
+        f_stop_mhz: Stopband start frequency in MHz.  Moving this outward widens
+            the transition band and is the primary lever for reducing in-band error.
+        tb_gap_mhz: Gap between the passband edge and the first transition-band
+            constraint point (MHz).  Leaving a small unconstrained gap just above
+            the passband edge reduces the "pull" on the passband near its edge,
+            further lowering in-band error.  Values above ~20 MHz start to produce
+            a gain bump in the gap region.
         delta_p: Passband ripple tolerance (linear, relative to DC gain).
         delta_s: Stopband attenuation tolerance (linear).
         n_iter: Maximum Lawson iterations.
@@ -367,10 +374,11 @@ def design_eqz_lowpass_remez(
         ]
     )
 
-    # Transition band grid (excluded from hard bands; used as soft bound)
-    tb_step = (sb_norm - pb_norm) / (n_grid // 2)
-    tb_freqs_pos = np.linspace(pb_norm + tb_step, sb_norm, n_grid // 2) * 2 * np.pi
-    tb_freqs_neg = np.linspace(-sb_norm, -pb_norm - tb_step, n_grid // 2) * 2 * np.pi
+    # Transition band grid starts tb_gap_mhz above the passband edge.
+    # The gap is left unconstrained; the cosine taper begins at that point.
+    tb_start_norm = pb_norm + tb_gap_mhz / fs_mhz
+    tb_freqs_pos = np.linspace(tb_start_norm, sb_norm, n_grid // 2) * 2 * np.pi
+    tb_freqs_neg = np.linspace(-sb_norm, -tb_start_norm, n_grid // 2) * 2 * np.pi
     tb_freqs = np.concatenate([tb_freqs_neg, tb_freqs_pos])
 
     # ------------------------------------------------------------------ #
@@ -405,8 +413,8 @@ def design_eqz_lowpass_remez(
     print(f"  delta_p     = {delta_p}  (passband),  delta_s = {delta_s}  (stopband)")
     print(f"  sb_weight   = delta_p/delta_s = {sb_weight:.4f}")
     print(
-        f"  transition  = cosine taper  [{20*np.log10(mag_start+1e-12):.2f} dB → {20*np.log10(delta_s+1e-12):.2f} dB]  "
-        f"({len(tb_freqs)} pts)"
+        f"  transition  = cosine taper  [{20*np.log10(mag_start+1e-12):.2f} dB → {20*np.log10(delta_s+1e-12):.2f} dB]"
+        f"  gap={tb_gap_mhz} MHz  ({len(tb_freqs)} pts)"
     )
     print(f"  max_iter    = {n_iter}")
 
@@ -555,8 +563,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--f-stop",
         type=float,
-        default=250,  # 250
+        default=250.0,
         help="Stopband start frequency in MHz",
+    )
+    p.add_argument(
+        "--tb-gap",
+        type=float,
+        default=50.0,
+        help="Gap between passband edge and TB constraint start (MHz)",
     )
     p.add_argument(
         "--delta-p",
@@ -593,6 +607,7 @@ if __name__ == "__main__":
         fs_mhz=args.fs,
         f_pass_mhz=args.f_pass,
         f_stop_mhz=args.f_stop,
+        tb_gap_mhz=args.tb_gap,
         delta_p=args.delta_p,
         delta_s=args.delta_s,
         n_iter=args.n_iter,
