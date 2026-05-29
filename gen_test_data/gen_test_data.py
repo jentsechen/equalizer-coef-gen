@@ -1,9 +1,13 @@
-import struct
+import os
+import sys
 import numpy as np
 import plotly.graph_objs as go
 import plotly.offline as pof
 from plotly.subplots import make_subplots
 import json
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from util.bin_io import load_bin_data
 
 def read_data(port, save_fig_en=False):
     common_path = "./tx_equalizer/waveform/tx_equalizer."
@@ -51,21 +55,6 @@ def save_bin_data(data, file_name):
     qntz_data = np.clip(np.round(interleaved * 2**14), -32768, 32767).astype(np.int16)
     with open("./{}.bin".format(file_name), "wb") as f:
         qntz_data.tofile(f)
-
-def load_bin_data(file_name):
-    with open("./{}.bin".format(file_name), "rb") as f:
-        data = f.read()
-    n_bytes = len(data)
-    decode_data = []
-    for i in range(int(n_bytes/32)):
-        for j in range(5):
-            s = i*32 + j*4
-            # re = float(struct.unpack("h", data[(s+2):(s+4)])[0])
-            # im = float(struct.unpack("h", data[s:(s+2)])[0])
-            re = float(struct.unpack("h", data[s:(s+2)])[0])
-            im = float(struct.unpack("h", data[(s+2):(s+4)])[0])
-            decode_data.append((re + 1j*im)/2**14)
-    return np.array(decode_data)
 
 def save_coef(coef):
     with open("./coef.json", "w", encoding="UTF-8") as f:

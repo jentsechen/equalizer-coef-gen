@@ -304,6 +304,159 @@ def _write_params_tex(
 
 
 # ---------------------------------------------------------------------------
+# Helpers for design_eqz_lowpass_remez
+# ---------------------------------------------------------------------------
+
+
+def _build_frequency_grids(
+    pb_norm: float,
+    sb_norm: float,
+    tb_start_norm: float,
+    n_grid: int,
+) -> tuple:
+    """Return (pb_freqs, sb_freqs, tb_freqs) in rad/sample."""
+    pb_freqs = np.concatenate(
+        [
+            np.linspace(-pb_norm, 0.0, n_grid) * 2 * np.pi,
+            np.linspace(0.0, pb_norm, n_grid) * 2 * np.pi,
+        ]
+    )
+    sb_freqs = np.concatenate(
+        [
+            np.linspace(-0.5, -sb_norm, n_grid) * 2 * np.pi,
+            np.linspace(sb_norm, 0.5, n_grid) * 2 * np.pi,
+        ]
+    )
+    tb_freqs_pos = np.linspace(tb_start_norm, sb_norm, n_grid // 2) * 2 * np.pi
+    tb_freqs_neg = np.linspace(-sb_norm, -tb_start_norm, n_grid // 2) * 2 * np.pi
+    tb_freqs = np.concatenate([tb_freqs_neg, tb_freqs_pos])
+    return pb_freqs, sb_freqs, tb_freqs
+
+
+def _build_tb_desired(
+    Hd_pb: np.ndarray,
+    delta_s: float,
+    n_grid: int,
+) -> tuple:
+    """Return (tb_desired, mag_start) for a cosine-tapered transition band."""
+    mag_start = float(np.max(np.abs(Hd_pb)))
+    t = np.linspace(0.0, 1.0, n_grid // 2)
+    tb_pos = mag_start + (delta_s - mag_start) * 0.5 * (1 - np.cos(np.pi * t))
+    tb_desired = np.concatenate([tb_pos[::-1], tb_pos])
+    return tb_desired, mag_start
+
+
+def _save_and_plot(
+    h: np.ndarray,
+    pb_freqs: np.ndarray,
+    tb_freqs: np.ndarray,
+    Hd_pb: np.ndarray,
+    tb_desired: np.ndarray,
+    f_pass_mhz: float,
+    f_stop_mhz: float,
+    fs_mhz: float,
+    pb_norm: float,
+    N: int,
+    delta_p: float,
+    delta_s: float,
+    out_dir: str,
+) -> None:
+    """Save coefficients, plot filter response, and write in-band error figures."""
+    _, H_eqz, H_combined, hc_freq_axis = compute_aaf_responses(
+        f_pass_mhz=f_pass_mhz, fs_mhz=fs_mhz
+    )
+    dc_idx = len(H_eqz) // 2
+    H_eqz = H_eqz / H_eqz[dc_idx]
+    H_combined = H_combined / H_combined[dc_idx]
+
+    _all_Hd_freqs = np.concatenate([pb_freqs, tb_freqs])
+    _all_Hd = np.concatenate([Hd_pb, tb_desired.astype(complex)])
+    _sort = np.argsort(_all_Hd_freqs)
+    Hd_freqs_plot = _all_Hd_freqs[_sort]
+    Hd_plot = _all_Hd[_sort]
+
+    save_coefficients(h, out_dir=out_dir, name="eqz_lowpass_remez")
+    plot_response(
+        h,
+        fs=fs_mhz,
+        out_dir=out_dir,
+        title=f"EQZ Lowpass FIR (Remez)  N={N}  ±{f_pass_mhz} MHz",
+        passband_edges=(0.0, pb_norm),
+        freq_unit="MHz",
+        Hd_freqs_rad=Hd_freqs_plot,
+        Hd=Hd_plot,
+        Hc_freqs_mhz=hc_freq_axis,
+        Hc=H_combined,
+        h_label="complex remez",
+    )
+
+    pb_mask = np.abs(hc_freq_axis) <= f_pass_mhz
+    freq_pb = hc_freq_axis[pb_mask]
+    ref_db = 20 * np.log10(np.abs(H_eqz[pb_mask]) + 1e-12)
+
+    hc_freqs_rad = hc_freq_axis / fs_mhz * 2 * np.pi
+    H_rmz_hc = evaluate_response(h, hc_freqs_rad)
+    H_rmz_hc = H_rmz_hc / H_rmz_hc[dc_idx]
+
+    def _err_db(H):
+        return np.abs(20 * np.log10(np.abs(H[pb_mask]) + 1e-12) - ref_db)
+
+    rmz_err = _err_db(H_rmz_hc)
+    print(
+        f"  In-band dB magnitude error  peak : {rmz_err.max():.3f} dB"
+        f"  (at {freq_pb[np.argmax(rmz_err)]:.1f} MHz)"
+    )
+    print(f"  In-band dB magnitude error  RMS  : {rmz_err.mean():.3f} dB")
+
+    FSIZE = 20
+    curves = [
+        (_err_db(H_combined), "direct combine"),
+        (_err_db(H_rmz_hc), "complex remez"),
+    ]
+
+    fig, ax = plt.subplots(figsize=(12, 5))
+    for err, label in curves:
+        ax.plot(freq_pb, err, lw=2.0, label=label)
+    ax.set_xlabel("Frequency (MHz)", fontsize=FSIZE)
+    ax.set_ylabel("Magnitude error (dB)", fontsize=FSIZE)
+    ax.tick_params(labelsize=FSIZE)
+    ax.legend(fontsize=FSIZE)
+    ax.grid(True, alpha=0.4)
+    fig.tight_layout()
+    err_png = os.path.join(out_dir, "inband_error.png")
+    fig.savefig(err_png, dpi=150)
+    plt.close(fig)
+    print(f"Saved in-band error plot → {err_png}")
+
+    pfig = go.Figure()
+    for err, label in curves:
+        pfig.add_trace(
+            go.Scatter(
+                x=freq_pb.tolist(), y=err.tolist(), name=label, line=dict(width=2)
+            )
+        )
+    pfig.update_layout(
+        xaxis_title="Frequency (MHz)",
+        yaxis_title="Magnitude error (dB)",
+        hovermode="x unified",
+        font=dict(size=FSIZE),
+    )
+    err_html = os.path.join(out_dir, "inband_error.html")
+    pfig.write_html(err_html)
+    print(f"Saved in-band error HTML  → {err_html}")
+
+    _write_params_tex(
+        path=os.path.join(_HERE, "document", "params_remez.tex"),
+        N=N,
+        fs_mhz=fs_mhz,
+        f_pass_mhz=f_pass_mhz,
+        f_stop_mhz=f_stop_mhz,
+        delta_p=delta_p,
+        delta_s=delta_s,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Main design routine
 # ---------------------------------------------------------------------------
 
@@ -348,56 +501,18 @@ def design_eqz_lowpass_remez(
     Returns:
         Designed complex tap vector h of shape (N,).
     """
-    # ------------------------------------------------------------------ #
-    # Step 1: 256-bin equalizer response, DC-normalised                  #
-    # ------------------------------------------------------------------ #
     eqz_resp = gen_eqz_freq_resp(sig=DistortedSig.UCDC, n_taps=4)
     dc_gain = eqz_resp[0]
     eqz_resp = eqz_resp / dc_gain
 
-    # ------------------------------------------------------------------ #
-    # Step 2: frequency grids (angular, rad/sample)                      #
-    # ------------------------------------------------------------------ #
-    pb_norm = f_pass_mhz / fs_mhz  # e.g. 162.5/750 = 0.2167
-    sb_norm = f_stop_mhz / fs_mhz  # e.g. 250.0/750 = 0.3333
-
-    pb_freqs = np.concatenate(
-        [
-            np.linspace(-pb_norm, 0.0, n_grid) * 2 * np.pi,
-            np.linspace(0.0, pb_norm, n_grid) * 2 * np.pi,
-        ]
-    )
-    sb_freqs = np.concatenate(
-        [
-            np.linspace(-0.5, -sb_norm, n_grid) * 2 * np.pi,
-            np.linspace(sb_norm, 0.5, n_grid) * 2 * np.pi,
-        ]
-    )
-
-    # Transition band grid starts tb_gap_mhz above the passband edge.
-    # The gap is left unconstrained; the cosine taper begins at that point.
+    pb_norm = f_pass_mhz / fs_mhz
+    sb_norm = f_stop_mhz / fs_mhz
     tb_start_norm = pb_norm + tb_gap_mhz / fs_mhz
-    tb_freqs_pos = np.linspace(tb_start_norm, sb_norm, n_grid // 2) * 2 * np.pi
-    tb_freqs_neg = np.linspace(-sb_norm, -tb_start_norm, n_grid // 2) * 2 * np.pi
-    tb_freqs = np.concatenate([tb_freqs_neg, tb_freqs_pos])
+    pb_freqs, sb_freqs, tb_freqs = _build_frequency_grids(pb_norm, sb_norm, tb_start_norm, n_grid)
 
-    # ------------------------------------------------------------------ #
-    # Step 3: interpolate eqz_resp onto the passband grid                #
-    # ------------------------------------------------------------------ #
     Hd_pb = interp_fft_response(eqz_resp, fs=fs_mhz, target_freqs_rad=pb_freqs)
+    tb_desired, mag_start = _build_tb_desired(Hd_pb, delta_s, n_grid)
 
-    # Transition-band desired magnitude: cosine taper from passband edge level
-    # down to delta_s at the stopband edge.  Zero slope at both endpoints means
-    # the ramp exerts no lateral pull on the passband or stopband constraints,
-    # giving lower in-band error than a dB-linear or linear-amplitude ramp.
-    mag_start = float(np.max(np.abs(Hd_pb)))  # ≈ 1.0 after DC normalisation
-    t = np.linspace(0.0, 1.0, n_grid // 2)
-    tb_pos = mag_start + (delta_s - mag_start) * 0.5 * (1 - np.cos(np.pi * t))
-    tb_desired = np.concatenate([tb_pos[::-1], tb_pos])
-
-    # ------------------------------------------------------------------ #
-    # Step 4: run complex Remez (Lawson IRLS)                            #
-    # ------------------------------------------------------------------ #
     # sb_weight = delta_p/delta_s encodes the relative tolerance so that at
     # convergence: peak_pb_error ≈ delta_p and peak_sb_level ≈ delta_s.
     sb_weight = delta_p / delta_s
@@ -431,113 +546,24 @@ def design_eqz_lowpass_remez(
         verbose=verbose,
     )
 
-    # ------------------------------------------------------------------ #
-    # Step 5: report achieved performance                                 #
-    # ------------------------------------------------------------------ #
     H_sb = evaluate_response(h, sb_freqs)
     sb_pk = float(np.max(np.abs(H_sb)))
     print(f"\n  Stopband peak |H| : {sb_pk:.5f}  ({20 * np.log10(sb_pk + 1e-12):.1f} dB)")
 
-    # ------------------------------------------------------------------ #
-    # Step 6: save and plot                                               #
-    # ------------------------------------------------------------------ #
-    _, H_eqz, H_combined, hc_freq_axis = compute_aaf_responses(
-        f_pass_mhz=f_pass_mhz, fs_mhz=fs_mhz
-    )
-    dc_idx = len(H_eqz) // 2
-    H_eqz = H_eqz / H_eqz[dc_idx]
-    H_combined = H_combined / H_combined[dc_idx]
-
-    # Build desired-response arrays for plotting: passband + transition band ramp
-    _all_Hd_freqs = np.concatenate([pb_freqs, tb_freqs])
-    _all_Hd = np.concatenate([Hd_pb, tb_desired.astype(complex)])
-    _sort = np.argsort(_all_Hd_freqs)
-    Hd_freqs_plot = _all_Hd_freqs[_sort]
-    Hd_plot = _all_Hd[_sort]
-
-    save_coefficients(h, out_dir=out_dir, name="eqz_lowpass_remez")
-    plot_response(
-        h,
-        fs=fs_mhz,
-        out_dir=out_dir,
-        title=f"EQZ Lowpass FIR (Remez)  N={N}  ±{f_pass_mhz} MHz",
-        passband_edges=(0.0, pb_norm),
-        freq_unit="MHz",
-        Hd_freqs_rad=Hd_freqs_plot,
-        Hd=Hd_plot,
-        Hc_freqs_mhz=hc_freq_axis,
-        Hc=H_combined,
-        h_label="complex remez",
-    )
-
-    # ---- In-band error figure -------------------------------------------
-    # Error metric: |mag_dB(H) − mag_dB(H_eqz)| inside the passband,
-    # same definition as gen_aaf_coef.plot_inband_error.
-    pb_mask = np.abs(hc_freq_axis) <= f_pass_mhz
-    freq_pb = hc_freq_axis[pb_mask]
-    ref_db = 20 * np.log10(np.abs(H_eqz[pb_mask]) + 1e-12)
-
-    # Evaluate the designed filter on the same AAF grid (hc_freq_axis in MHz)
-    hc_freqs_rad = hc_freq_axis / fs_mhz * 2 * np.pi
-    H_rmz_hc = evaluate_response(h, hc_freqs_rad)
-    H_rmz_hc = H_rmz_hc / H_rmz_hc[dc_idx]
-
-    def _err_db(H):
-        return np.abs(20 * np.log10(np.abs(H[pb_mask]) + 1e-12) - ref_db)
-
-    rmz_err = _err_db(H_rmz_hc)
-    print(
-        f"  In-band dB magnitude error  peak : {rmz_err.max():.3f} dB"
-        f"  (at {freq_pb[np.argmax(rmz_err)]:.1f} MHz)"
-    )
-    print(f"  In-band dB magnitude error  RMS  : {rmz_err.mean():.3f} dB")
-
-    FSIZE = 20
-    curves = [
-        (_err_db(H_combined), "direct combine"),
-        (_err_db(H_rmz_hc), "complex remez"),
-    ]
-
-    # matplotlib PNG
-    fig, ax = plt.subplots(figsize=(12, 5))
-    for err, label in curves:
-        ax.plot(freq_pb, err, lw=2.0, label=label)
-    ax.set_xlabel("Frequency (MHz)", fontsize=FSIZE)
-    ax.set_ylabel("Magnitude error (dB)", fontsize=FSIZE)
-    ax.tick_params(labelsize=FSIZE)
-    ax.legend(fontsize=FSIZE)
-    ax.grid(True, alpha=0.4)
-    fig.tight_layout()
-    err_png = os.path.join(out_dir, "inband_error.png")
-    fig.savefig(err_png, dpi=150)
-    plt.close(fig)
-    print(f"Saved in-band error plot → {err_png}")
-
-    # Plotly interactive HTML
-    pfig = go.Figure()
-    for err, label in curves:
-        pfig.add_trace(
-            go.Scatter(
-                x=freq_pb.tolist(), y=err.tolist(), name=label, line=dict(width=2)
-            )
-        )
-    pfig.update_layout(
-        xaxis_title="Frequency (MHz)",
-        yaxis_title="Magnitude error (dB)",
-        hovermode="x unified",
-        font=dict(size=FSIZE),
-    )
-    err_html = os.path.join(out_dir, "inband_error.html")
-    pfig.write_html(err_html)
-    print(f"Saved in-band error HTML  → {err_html}")
-    _write_params_tex(
-        path=os.path.join(_HERE, "document", "params_remez.tex"),
-        N=N,
-        fs_mhz=fs_mhz,
+    _save_and_plot(
+        h=h,
+        pb_freqs=pb_freqs,
+        tb_freqs=tb_freqs,
+        Hd_pb=Hd_pb,
+        tb_desired=tb_desired,
         f_pass_mhz=f_pass_mhz,
         f_stop_mhz=f_stop_mhz,
+        fs_mhz=fs_mhz,
+        pb_norm=pb_norm,
+        N=N,
         delta_p=delta_p,
         delta_s=delta_s,
+        out_dir=out_dir,
     )
     return h
 

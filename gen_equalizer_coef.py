@@ -1,4 +1,3 @@
-import struct
 import numpy as np
 import plotly.graph_objs as go
 import plotly.offline as pof
@@ -7,21 +6,7 @@ import json
 from tx_equalizer_design import TxEqzDesByChirp
 from scipy.signal import resample_poly
 import matplotlib.pyplot as plt
-
-def load_bin_data(file_name):
-    with open("./{}.bin".format(file_name), "rb") as f:
-        data = f.read()
-    n_bytes = len(data)
-    decode_data = []
-    for i in range(int(n_bytes/32)):
-        for j in range(5):
-            s = i*32 + j*4
-            # re = float(struct.unpack("h", data[(s+2):(s+4)])[0])
-            # im = float(struct.unpack("h", data[s:(s+2)])[0])
-            re = float(struct.unpack("h", data[s:(s+2)])[0])
-            im = float(struct.unpack("h", data[(s+2):(s+4)])[0])
-            decode_data.append((re + 1j*im)/2**14)
-    return np.array(decode_data)
+from util.bin_io import load_bin_data
 
 def save_bin_data(data, file_name):
     assert len(data) % 5 == 0
@@ -36,21 +21,6 @@ def save_bin_data(data, file_name):
     qntz_data = np.clip(np.round(interleaved * 2**14), -32768, 32767).astype(np.int16)
     with open("./{}.bin".format(file_name), "wb") as f:
         qntz_data.tofile(f)
-
-def load_bin_data(file_name):
-    with open("./{}.bin".format(file_name), "rb") as f:
-        data = f.read()
-    n_bytes = len(data)
-    decode_data = []
-    for i in range(int(n_bytes/32)):
-        for j in range(5):
-            s = i*32 + j*4
-            # re = float(struct.unpack("h", data[(s+2):(s+4)])[0])
-            # im = float(struct.unpack("h", data[s:(s+2)])[0])
-            re = float(struct.unpack("h", data[s:(s+2)])[0])
-            im = float(struct.unpack("h", data[(s+2):(s+4)])[0])
-            decode_data.append((re + 1j*im)/2**14)
-    return np.array(decode_data)
 
 if __name__ == "__main__":
     tx_eqz_des_by_chirp = TxEqzDesByChirp()
