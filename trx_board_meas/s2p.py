@@ -71,13 +71,16 @@ def _col_indices(stem: str):
 
 
 def _load_decimated(path: Path):
-    """Load a full-range S2P file with decimation and linear phase removal."""
+    """Load a full-range S2P file with decimation. Phase is unwrapped and
+    zero-referenced at the first point so it plots as a straight line for
+    linear-phase paths (global detrending is avoided because noisy phase
+    at the band edges distorts the polyfit baseline)."""
     gain_col, phase_col = _col_indices(path.stem)
     data = np.loadtxt(path, comments=("!", "#"), usecols=(0, gain_col, phase_col))
     freq = data[::_DECIMATE, 0] * 1e-9
     gain = data[::_DECIMATE, 1]
     phase_rad = np.unwrap(np.deg2rad(data[::_DECIMATE, 2]))
-    phase_deg = np.rad2deg(phase_rad - np.polyval(np.polyfit(freq, phase_rad, 1), freq))
+    phase_deg = np.rad2deg(phase_rad - phase_rad[0])
     return freq, gain, phase_deg
 
 

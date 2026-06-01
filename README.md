@@ -19,6 +19,11 @@ equalizer-coef-gen/
 ├── training_sig/               # Training signal files used for equalizer coefficient solving
 ├── util/                       # Shared utilities (JSON I/O, signal analysis, plotting helpers)
 ├── chisel3cr/                  # Fixed-point arithmetic helpers matching the Chisel3 hardware types
+├── trx_board_meas/             # TRX board S-parameter measurements and equalization filter tools
+│   ├── data/                   #   Touchstone S2P files (tx, stx, rx, srx; ch0/ch1; h2–h4, v3–v4)
+│   ├── figure/                 #   Output: measurement plots (HTML)
+│   ├── s2p.py                  #   S2P reader and equalization filter computation
+│   └── plot.py                 #   Plotting entry point: generates tx_stx.html and rx_srx.html
 ├── diagram/                    # Top-level figures (memory data format diagram, PA model plots)
 ├── tx_equalizer_design.py      # Tx equalizer design and coefficient generation
 ├── gen_equalizer_coef.py       # Entry point: generates final equalizer coefficients
