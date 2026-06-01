@@ -1,10 +1,12 @@
 from pathlib import Path
 
 import numpy as np
+from scipy.interpolate import interp1d
 from scipy.signal import savgol_filter
 
 _DATA_DIR = Path(__file__).parent / "data"
 _FIGURE_DIR = Path(__file__).parent / "figure"
+_FREQ_RESP_DIR = Path(__file__).parent / "freq_resp"
 
 # Touchstone S DB interleaved columns: S11(1,2) S21(3,4) S12(5,6) S22(7,8)
 _S21 = (3, 4)
@@ -35,9 +37,8 @@ def fcx_read_s2p(
     magnitude = 10 ** (gain_db / 20)
     phase_rad = np.deg2rad(phase_deg)
 
-    p = np.polyfit(frequencies, np.unwrap(phase_rad), 1)
-    phase_rad = np.unwrap(phase_rad) - np.polyval(p, frequencies)
-    phase_deg = np.rad2deg(np.unwrap(phase_rad))
+    phase_rad = np.unwrap(phase_rad)
+    phase_deg = np.rad2deg(phase_rad)
     s_complex = magnitude * np.exp(1j * phase_rad)
 
     eps = 1e-12
@@ -58,6 +59,55 @@ def fcx_read_s2p(
         W,
         W_smooth,
     )
+
+
+def save_freq_resp(stem: str, out_dir: Path = None, **kwargs) -> Path:
+    """Load an S2P file by stem and save the complex frequency response as .npy.
+
+    The saved array has shape (2, N) complex128:
+      row 0 — frequencies in GHz (real part only)
+      row 1 — complex S21 (magnitude * exp(j*phase))
+    """
+    path = _DATA_DIR / f"{stem}.s2p"
+    freq, _, _, s_complex, _, _ = fcx_read_s2p(str(path), **kwargs)
+    ref_idx = np.argmin(np.abs(freq - 9.65))
+    s_complex = s_complex / np.abs(s_complex[ref_idx])
+    out_dir = Path(out_dir) if out_dir is not None else _FREQ_RESP_DIR
+    out_dir.mkdir(exist_ok=True)
+    out = out_dir / f"{stem}.npy"
+    np.save(out, np.array([freq.astype(complex), s_complex]))
+    return out
+
+
+def load_freq_resp(path) -> tuple:
+    """Load a .npy frequency response file.
+
+    Returns: frequencies (GHz, float), s_complex (complex128)
+    """
+    data = np.load(path)
+    return data[0].real, data[1]
+
+
+def load_freq_resp_as_fft(path, n_fft: int = 256, fs_mhz: float = 750.0, fc_ghz: float = 9.65) -> np.ndarray:
+    """Load a .npy freq response and return an n_fft-bin complex array in FFT bin order.
+
+    Maps measurement frequencies (GHz) to digital rad/sample centered at fc_ghz,
+    then interpolates onto the n_fft FFT bin grid. Bins outside the measurement
+    range are filled with the nearest edge value.
+    """
+    freq_ghz, s_complex = load_freq_resp(path)
+    freq_rad = (freq_ghz - fc_ghz) * 1000.0 / fs_mhz * 2 * np.pi
+
+    order = np.argsort(freq_rad)
+    sf, ss = freq_rad[order], s_complex[order]
+
+    re_fn = interp1d(sf, ss.real, kind="linear", bounds_error=False,
+                     fill_value=(ss.real[0], ss.real[-1]))
+    im_fn = interp1d(sf, ss.imag, kind="linear", bounds_error=False,
+                     fill_value=(ss.imag[0], ss.imag[-1]))
+
+    bin_freqs_rad = 2 * np.pi * np.fft.fftfreq(n_fft)
+    return re_fn(bin_freqs_rad) + 1j * im_fn(bin_freqs_rad)
 
 
 def _col_indices(stem: str):

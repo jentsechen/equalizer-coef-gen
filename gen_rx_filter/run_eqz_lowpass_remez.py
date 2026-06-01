@@ -59,8 +59,10 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
 sys.path.insert(0, _ROOT)
 sys.path.insert(0, _HERE)
+sys.path.insert(0, os.path.join(_ROOT, "trx_board_meas"))
 
 from gen_rx_filter import gen_eqz_freq_resp, DistortedSig
+from s2p import load_freq_resp_as_fft
 from gen_aaf_coef import compute_responses as compute_aaf_responses
 from design_fir_cvxpy import (
     build_frequency_matrix,
@@ -473,6 +475,8 @@ def design_eqz_lowpass_remez(
     n_grid: int = 512,
     out_dir: str = "gen_rx_filter/figure/eqz_lowpass_remez",
     verbose: bool = False,
+    eqz_resp_path: Optional[str] = None,
+    use_transition_band: bool = True,
 ) -> np.ndarray:
     """Design a complex lowpass FIR matched to the UCDC equalizer response.
 
@@ -501,7 +505,10 @@ def design_eqz_lowpass_remez(
     Returns:
         Designed complex tap vector h of shape (N,).
     """
-    eqz_resp = gen_eqz_freq_resp(sig=DistortedSig.UCDC, n_taps=4)
+    if eqz_resp_path is not None:
+        eqz_resp = load_freq_resp_as_fft(eqz_resp_path, n_fft=256, fs_mhz=fs_mhz)
+    else:
+        eqz_resp = gen_eqz_freq_resp(sig=DistortedSig.UCDC, n_taps=4)
     dc_gain = eqz_resp[0]
     eqz_resp = eqz_resp / dc_gain
 
@@ -521,16 +528,22 @@ def design_eqz_lowpass_remez(
     print(f"  fs          = {fs_mhz} MHz")
     print(f"  Passband    = ±{f_pass_mhz} MHz  (±{pb_norm:.4f} × fs)")
     print(f"  Stopband    ≥  {f_stop_mhz} MHz  ( {sb_norm:.4f} × fs)")
-    print("  Desired     = eqz_resp (UCDC, n_taps=4), 256-bin FFT, DC-normalised")
+    if eqz_resp_path is not None:
+        print(f"  Desired     = {eqz_resp_path}, 256-bin FFT, DC-normalised")
+    else:
+        print("  Desired     = eqz_resp (UCDC, n_taps=4), 256-bin FFT, DC-normalised")
     print(
         f"  DC gain removed: |{np.abs(dc_gain):.6f}|  ∠{np.degrees(np.angle(dc_gain)):.2f}°"
     )
     print(f"  delta_p     = {delta_p}  (passband),  delta_s = {delta_s}  (stopband)")
     print(f"  sb_weight   = delta_p/delta_s = {sb_weight:.4f}")
-    print(
-        f"  transition  = cosine taper  [{20*np.log10(mag_start+1e-12):.2f} dB → {20*np.log10(delta_s+1e-12):.2f} dB]"
-        f"  gap={tb_gap_mhz} MHz  ({len(tb_freqs)} pts)"
-    )
+    if use_transition_band:
+        print(
+            f"  transition  = cosine taper  [{20*np.log10(mag_start+1e-12):.2f} dB → {20*np.log10(delta_s+1e-12):.2f} dB]"
+            f"  gap={tb_gap_mhz} MHz  ({len(tb_freqs)} pts)"
+        )
+    else:
+        print("  transition  = disabled")
     print(f"  max_iter    = {n_iter}")
 
     h = design_complex_fir_remez(
@@ -539,8 +552,8 @@ def design_eqz_lowpass_remez(
         stopband_freqs=sb_freqs,
         Hd_passband=Hd_pb,
         sb_weight=sb_weight,
-        transition_freqs=tb_freqs,
-        Hd_transition=tb_desired,
+        transition_freqs=tb_freqs if use_transition_band else None,
+        Hd_transition=tb_desired if use_transition_band else None,
         tb_weight=0.05,
         n_iter=n_iter,
         verbose=verbose,
@@ -589,13 +602,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--f-stop",
         type=float,
-        default=250.0,
+        default=210.0,
         help="Stopband start frequency in MHz",
     )
     p.add_argument(
         "--tb-gap",
         type=float,
-        default=50.0,
+        default=20.0,
         help="Gap between passband edge and TB constraint start (MHz)",
     )
     p.add_argument(
@@ -623,6 +636,20 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--verbose", action="store_true", help="Print per-iteration Lawson diagnostics"
     )
+    p.add_argument(
+        "--no-transition-band",
+        action="store_true",
+        # action="store_false",
+        help="Disable transition band constraints; solver uses only passband and stopband",
+    )
+    p.add_argument(
+        "--eqz-resp-path",
+        type=str,
+        # default=None,
+        default="trx_board_meas/freq_resp/rx_ch1_h3.npy",
+        help="Path to a .npy freq response file (shape (2,N) complex128) to use as eqz_resp "
+             "instead of the default UCDC model. E.g. trx_board_meas/freq_resp/rx_ch1_h3.npy",
+    )
     return p
 
 
@@ -640,4 +667,6 @@ if __name__ == "__main__":
         n_grid=args.n_grid,
         out_dir=args.out_dir,
         verbose=args.verbose,
+        eqz_resp_path=args.eqz_resp_path,
+        use_transition_band=not args.no_transition_band,
     )
