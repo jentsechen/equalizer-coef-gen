@@ -1,0 +1,15 @@
+{
+    "N": 63,
+    "fs_mhz": 750.0,
+    "f_pass_mhz": 162.5,
+    "f_stop_mhz": 210.0,
+    "tb_gap_mhz": 20.0,
+    "delta_p": 0.05,
+    "delta_s": 0.10,
+    "n_iter": 150,
+    "n_grid": 512,
+    "out_dir": "gen_rx_filter/figure/eqz_lowpass_remez",
+    "verbose": false,
+    "eqz_resp_path": "trx_board_meas/freq_resp/rx_ch1_h3_eqz.npy",
+    "use_transition_band": true
+}

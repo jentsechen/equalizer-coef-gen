@@ -160,7 +160,8 @@ def main():
     plot_tx_stx()
     plot_rx_srx()
     print_ripple()
-    save_freq_resp("rx_ch1_h3")
+    save_freq_resp("rx_ch1_h3")                        # full phase — for display
+    save_freq_resp("rx_ch1_h3", detrend_phase=True)    # detrended  — for FIR design
     plot_freq_resp(stem="rx_ch1_h3")
 
 

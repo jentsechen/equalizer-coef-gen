@@ -61,20 +61,37 @@ def fcx_read_s2p(
     )
 
 
-def save_freq_resp(stem: str, out_dir: Path = None, **kwargs) -> Path:
+def save_freq_resp(stem: str, out_dir: Path = None, smooth_mag: bool = True, smooth_win: int = 101, detrend_phase: bool = False, **kwargs) -> Path:
     """Load an S2P file by stem and save the complex frequency response as .npy.
 
     The saved array has shape (2, N) complex128:
       row 0 — frequencies in GHz (real part only)
       row 1 — complex S21 (magnitude * exp(j*phase))
+
+    smooth_mag: smooth magnitude with Savitzky-Golay (window=smooth_win, polyorder=3),
+                phase kept intact.
+    detrend_phase: remove the linear phase trend (bulk group delay) so only phase
+                   deviation remains — output is saved as {stem}_eqz.npy.
+                   Use this version for equalizer FIR design to avoid non-causality.
     """
     path = _DATA_DIR / f"{stem}.s2p"
     freq, _, _, s_complex, _, _ = fcx_read_s2p(str(path), **kwargs)
     ref_idx = np.argmin(np.abs(freq - 9.65))
     s_complex = s_complex / np.abs(s_complex[ref_idx])
+    if smooth_mag:
+        n = len(s_complex)
+        win = min(smooth_win, n if n % 2 == 1 else n - 1)
+        mag_smooth = savgol_filter(np.abs(s_complex), win, 3)
+        s_complex = mag_smooth * np.exp(1j * np.angle(s_complex))
+    if detrend_phase:
+        phase = np.unwrap(np.angle(s_complex))
+        p = np.polyfit(freq, phase, 1)
+        phase_detrended = phase - np.polyval(p, freq)
+        s_complex = np.abs(s_complex) * np.exp(1j * phase_detrended)
     out_dir = Path(out_dir) if out_dir is not None else _FREQ_RESP_DIR
     out_dir.mkdir(exist_ok=True)
-    out = out_dir / f"{stem}.npy"
+    out_stem = f"{stem}_eqz" if detrend_phase else stem
+    out = out_dir / f"{out_stem}.npy"
     np.save(out, np.array([freq.astype(complex), s_complex]))
     return out
 

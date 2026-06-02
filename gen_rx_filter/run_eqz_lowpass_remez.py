@@ -45,9 +45,10 @@ Run from the repository root:
     python3.8 gen_rx_filter/run_eqz_lowpass_remez.py --N 63 --n-iter 150
 """
 
-import argparse
+import json
 import os
 import sys
+from dataclasses import dataclass
 from typing import Optional, Union
 
 import matplotlib.pyplot as plt
@@ -71,6 +72,35 @@ from design_fir_cvxpy import (
     plot_response,
     save_coefficients,
 )
+
+
+# ---------------------------------------------------------------------------
+# Configuration dataclass
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RemezConfig:
+    """All parameters for design_eqz_lowpass_remez, serialisable to/from JSON."""
+
+    N: int = 63
+    fs_mhz: float = 750.0
+    f_pass_mhz: float = 162.5
+    f_stop_mhz: float = 210.0
+    tb_gap_mhz: float = 20.0
+    delta_p: float = 0.05
+    delta_s: float = 0.10
+    n_iter: int = 150
+    n_grid: int = 512
+    out_dir: str = "gen_rx_filter/figure/eqz_lowpass_remez"
+    verbose: bool = False
+    eqz_resp_path: Optional[str] = "trx_board_meas/freq_resp/rx_ch1_h3_eqz.npy"
+    use_transition_band: bool = True
+
+    @classmethod
+    def from_json(cls, path: str) -> "RemezConfig":
+        with open(path) as f:
+            return cls(**json.load(f))
 
 
 # ---------------------------------------------------------------------------
@@ -348,6 +378,38 @@ def _build_tb_desired(
     return tb_desired, mag_start
 
 
+def _compute_metrics(
+    h: np.ndarray,
+    sb_freqs: np.ndarray,
+    f_pass_mhz: float,
+    fs_mhz: float,
+) -> dict:
+    """Return design quality metrics without any file I/O."""
+    _, H_eqz, _, hc_freq_axis = compute_aaf_responses(f_pass_mhz=f_pass_mhz, fs_mhz=fs_mhz)
+    dc_idx = len(H_eqz) // 2
+    H_eqz_norm = H_eqz / H_eqz[dc_idx]
+
+    pb_mask = np.abs(hc_freq_axis) <= f_pass_mhz
+    ref_db = 20 * np.log10(np.abs(H_eqz_norm[pb_mask]) + 1e-12)
+
+    hc_freqs_rad = hc_freq_axis / fs_mhz * 2 * np.pi
+    H_rmz_hc = evaluate_response(h, hc_freqs_rad)
+    H_rmz_hc = H_rmz_hc / H_rmz_hc[dc_idx]
+
+    H_sb = evaluate_response(h, sb_freqs)
+    sb_pk = float(np.max(np.abs(H_sb)))
+
+    rmz_err = np.abs(20 * np.log10(np.abs(H_rmz_hc[pb_mask]) + 1e-12) - ref_db)
+
+    return {
+        "sb_peak_linear": sb_pk,
+        "sb_peak_db": float(20 * np.log10(sb_pk + 1e-12)),
+        "inband_err_peak_db": float(rmz_err.max()),
+        "inband_err_peak_freq_mhz": float(hc_freq_axis[pb_mask][np.argmax(rmz_err)]),
+        "inband_err_rms_db": float(rmz_err.mean()),
+    }
+
+
 def _save_and_plot(
     h: np.ndarray,
     pb_freqs: np.ndarray,
@@ -364,12 +426,11 @@ def _save_and_plot(
     out_dir: str,
 ) -> None:
     """Save coefficients, plot filter response, and write in-band error figures."""
-    _, H_eqz, H_combined, hc_freq_axis = compute_aaf_responses(
+    _, H_eqz, _, hc_freq_axis = compute_aaf_responses(
         f_pass_mhz=f_pass_mhz, fs_mhz=fs_mhz
     )
     dc_idx = len(H_eqz) // 2
     H_eqz = H_eqz / H_eqz[dc_idx]
-    H_combined = H_combined / H_combined[dc_idx]
 
     _all_Hd_freqs = np.concatenate([pb_freqs, tb_freqs])
     _all_Hd = np.concatenate([Hd_pb, tb_desired.astype(complex)])
@@ -387,8 +448,6 @@ def _save_and_plot(
         freq_unit="MHz",
         Hd_freqs_rad=Hd_freqs_plot,
         Hd=Hd_plot,
-        Hc_freqs_mhz=hc_freq_axis,
-        Hc=H_combined,
         h_label="complex remez",
     )
 
@@ -403,22 +462,11 @@ def _save_and_plot(
     def _err_db(H):
         return np.abs(20 * np.log10(np.abs(H[pb_mask]) + 1e-12) - ref_db)
 
-    rmz_err = _err_db(H_rmz_hc)
-    print(
-        f"  In-band dB magnitude error  peak : {rmz_err.max():.3f} dB"
-        f"  (at {freq_pb[np.argmax(rmz_err)]:.1f} MHz)"
-    )
-    print(f"  In-band dB magnitude error  RMS  : {rmz_err.mean():.3f} dB")
-
     FSIZE = 20
-    curves = [
-        (_err_db(H_combined), "direct combine"),
-        (_err_db(H_rmz_hc), "complex remez"),
-    ]
+    rmz_err = _err_db(H_rmz_hc)
 
     fig, ax = plt.subplots(figsize=(12, 5))
-    for err, label in curves:
-        ax.plot(freq_pb, err, lw=2.0, label=label)
+    ax.plot(freq_pb, rmz_err, lw=2.0, label="complex remez")
     ax.set_xlabel("Frequency (MHz)", fontsize=FSIZE)
     ax.set_ylabel("Magnitude error (dB)", fontsize=FSIZE)
     ax.tick_params(labelsize=FSIZE)
@@ -431,12 +479,11 @@ def _save_and_plot(
     print(f"Saved in-band error plot → {err_png}")
 
     pfig = go.Figure()
-    for err, label in curves:
-        pfig.add_trace(
-            go.Scatter(
-                x=freq_pb.tolist(), y=err.tolist(), name=label, line=dict(width=2)
-            )
+    pfig.add_trace(
+        go.Scatter(
+            x=freq_pb.tolist(), y=rmz_err.tolist(), name="complex remez", line=dict(width=2)
         )
+    )
     pfig.update_layout(
         xaxis_title="Frequency (MHz)",
         yaxis_title="Magnitude error (dB)",
@@ -464,209 +511,100 @@ def _save_and_plot(
 
 
 def design_eqz_lowpass_remez(
-    N: int = 63,
-    fs_mhz: float = 750.0,
-    f_pass_mhz: float = 162.5,
-    f_stop_mhz: float = 250.0,
-    tb_gap_mhz: float = 0.0,
-    delta_p: float = 0.05,
-    delta_s: float = 0.10,
-    n_iter: int = 150,
-    n_grid: int = 512,
-    out_dir: str = "gen_rx_filter/figure/eqz_lowpass_remez",
-    verbose: bool = False,
-    eqz_resp_path: Optional[str] = None,
-    use_transition_band: bool = True,
-) -> np.ndarray:
+    cfg: RemezConfig,
+    save: bool = True,
+    eqz_resp: Optional[np.ndarray] = None,
+) -> tuple:
     """Design a complex lowpass FIR matched to the UCDC equalizer response.
 
     Uses the complex Remez algorithm (Lawson IRLS) instead of a CVXPY SOCP.
-    The band weight ratio delta_p/delta_s is passed to the solver so that the
-    equiripple condition at convergence targets both tolerances simultaneously.
 
     Args:
-        N: Number of filter taps.
-        fs_mhz: Sample rate in MHz.
-        f_pass_mhz: Passband half-bandwidth in MHz (±f_pass_mhz).
-        f_stop_mhz: Stopband start frequency in MHz.  Moving this outward widens
-            the transition band and is the primary lever for reducing in-band error.
-        tb_gap_mhz: Gap between the passband edge and the first transition-band
-            constraint point (MHz).  Leaving a small unconstrained gap just above
-            the passband edge reduces the "pull" on the passband near its edge,
-            further lowering in-band error.  Values above ~20 MHz start to produce
-            a gain bump in the gap region.
-        delta_p: Passband ripple tolerance (linear, relative to DC gain).
-        delta_s: Stopband attenuation tolerance (linear).
-        n_iter: Maximum Lawson iterations.
-        n_grid: Frequency grid points per band.
-        out_dir: Output directory for saved files.
-        verbose: Print per-iteration solver diagnostics.
+        cfg: All design parameters as a RemezConfig (load from JSON via RemezConfig.from_json).
+        save: If True, save coefficients and plots to cfg.out_dir.
+        eqz_resp: Pre-computed equalizer response array (n_fft complex bins, FFT order).
+            When provided, cfg.eqz_resp_path is ignored for loading — pass the array
+            returned by build_eqz_final() to train on the inverted+linear-trend response.
 
     Returns:
-        Designed complex tap vector h of shape (N,).
+        (h, metrics) — h is the complex tap vector of shape (cfg.N,); metrics is a dict
+        with keys sb_peak_db, inband_err_peak_db, inband_err_peak_freq_mhz, inband_err_rms_db.
     """
-    if eqz_resp_path is not None:
-        eqz_resp = load_freq_resp_as_fft(eqz_resp_path, n_fft=256, fs_mhz=fs_mhz)
+    if eqz_resp is not None:
+        _desired_label = "precomputed array (eqz + linear trend)"
+    elif cfg.eqz_resp_path is not None:
+        eqz_resp = load_freq_resp_as_fft(cfg.eqz_resp_path, n_fft=256, fs_mhz=cfg.fs_mhz)
+        _desired_label = f"{cfg.eqz_resp_path}, 256-bin FFT"
     else:
         eqz_resp = gen_eqz_freq_resp(sig=DistortedSig.UCDC, n_taps=4)
+        _desired_label = "UCDC model (n_taps=4)"
     dc_gain = eqz_resp[0]
     eqz_resp = eqz_resp / dc_gain
 
-    pb_norm = f_pass_mhz / fs_mhz
-    sb_norm = f_stop_mhz / fs_mhz
-    tb_start_norm = pb_norm + tb_gap_mhz / fs_mhz
-    pb_freqs, sb_freqs, tb_freqs = _build_frequency_grids(pb_norm, sb_norm, tb_start_norm, n_grid)
+    pb_norm = cfg.f_pass_mhz / cfg.fs_mhz
+    sb_norm = cfg.f_stop_mhz / cfg.fs_mhz
+    tb_start_norm = pb_norm + cfg.tb_gap_mhz / cfg.fs_mhz
+    pb_freqs, sb_freqs, tb_freqs = _build_frequency_grids(pb_norm, sb_norm, tb_start_norm, cfg.n_grid)
 
-    Hd_pb = interp_fft_response(eqz_resp, fs=fs_mhz, target_freqs_rad=pb_freqs)
-    tb_desired, mag_start = _build_tb_desired(Hd_pb, delta_s, n_grid)
+    Hd_pb = interp_fft_response(eqz_resp, fs=cfg.fs_mhz, target_freqs_rad=pb_freqs)
+    tb_desired, mag_start = _build_tb_desired(Hd_pb, cfg.delta_s, cfg.n_grid)
 
-    # sb_weight = delta_p/delta_s encodes the relative tolerance so that at
-    # convergence: peak_pb_error ≈ delta_p and peak_sb_level ≈ delta_s.
-    sb_weight = delta_p / delta_s
+    sb_weight = cfg.delta_p / cfg.delta_s
 
-    print(f"Designing {N}-tap complex lowpass FIR  [complex Remez / Lawson IRLS]")
-    print(f"  fs          = {fs_mhz} MHz")
-    print(f"  Passband    = ±{f_pass_mhz} MHz  (±{pb_norm:.4f} × fs)")
-    print(f"  Stopband    ≥  {f_stop_mhz} MHz  ( {sb_norm:.4f} × fs)")
-    if eqz_resp_path is not None:
-        print(f"  Desired     = {eqz_resp_path}, 256-bin FFT, DC-normalised")
-    else:
-        print("  Desired     = eqz_resp (UCDC, n_taps=4), 256-bin FFT, DC-normalised")
+    print(f"Designing {cfg.N}-tap complex lowpass FIR  [complex Remez / Lawson IRLS]")
+    print(f"  fs          = {cfg.fs_mhz} MHz")
+    print(f"  Passband    = ±{cfg.f_pass_mhz} MHz  (±{pb_norm:.4f} × fs)")
+    print(f"  Stopband    ≥  {cfg.f_stop_mhz} MHz  ( {sb_norm:.4f} × fs)")
+    print(f"  Desired     = {_desired_label}, DC-normalised")
     print(
         f"  DC gain removed: |{np.abs(dc_gain):.6f}|  ∠{np.degrees(np.angle(dc_gain)):.2f}°"
     )
-    print(f"  delta_p     = {delta_p}  (passband),  delta_s = {delta_s}  (stopband)")
+    print(f"  delta_p     = {cfg.delta_p}  (passband),  delta_s = {cfg.delta_s}  (stopband)")
     print(f"  sb_weight   = delta_p/delta_s = {sb_weight:.4f}")
-    if use_transition_band:
+    if cfg.use_transition_band:
         print(
-            f"  transition  = cosine taper  [{20*np.log10(mag_start+1e-12):.2f} dB → {20*np.log10(delta_s+1e-12):.2f} dB]"
-            f"  gap={tb_gap_mhz} MHz  ({len(tb_freqs)} pts)"
+            f"  transition  = cosine taper  [{20*np.log10(mag_start+1e-12):.2f} dB → {20*np.log10(cfg.delta_s+1e-12):.2f} dB]"
+            f"  gap={cfg.tb_gap_mhz} MHz  ({len(tb_freqs)} pts)"
         )
     else:
         print("  transition  = disabled")
-    print(f"  max_iter    = {n_iter}")
+    print(f"  max_iter    = {cfg.n_iter}")
 
     h = design_complex_fir_remez(
-        N=N,
+        N=cfg.N,
         passband_freqs=pb_freqs,
         stopband_freqs=sb_freqs,
         Hd_passband=Hd_pb,
         sb_weight=sb_weight,
-        transition_freqs=tb_freqs if use_transition_band else None,
-        Hd_transition=tb_desired if use_transition_band else None,
+        transition_freqs=tb_freqs if cfg.use_transition_band else None,
+        Hd_transition=tb_desired if cfg.use_transition_band else None,
         tb_weight=0.05,
-        n_iter=n_iter,
-        verbose=verbose,
+        n_iter=cfg.n_iter,
+        verbose=cfg.verbose,
     )
 
-    H_sb = evaluate_response(h, sb_freqs)
-    sb_pk = float(np.max(np.abs(H_sb)))
-    print(f"\n  Stopband peak |H| : {sb_pk:.5f}  ({20 * np.log10(sb_pk + 1e-12):.1f} dB)")
+    metrics = _compute_metrics(h, sb_freqs, cfg.f_pass_mhz, cfg.fs_mhz)
+    print(f"\n  Stopband peak |H| : {metrics['sb_peak_linear']:.5f}  ({metrics['sb_peak_db']:.1f} dB)")
+    print(
+        f"  In-band dB magnitude error  peak : {metrics['inband_err_peak_db']:.3f} dB"
+        f"  (at {metrics['inband_err_peak_freq_mhz']:.1f} MHz)"
+    )
+    print(f"  In-band dB magnitude error  RMS  : {metrics['inband_err_rms_db']:.3f} dB")
 
-    _save_and_plot(
-        h=h,
-        pb_freqs=pb_freqs,
-        tb_freqs=tb_freqs,
-        Hd_pb=Hd_pb,
-        tb_desired=tb_desired,
-        f_pass_mhz=f_pass_mhz,
-        f_stop_mhz=f_stop_mhz,
-        fs_mhz=fs_mhz,
-        pb_norm=pb_norm,
-        N=N,
-        delta_p=delta_p,
-        delta_s=delta_s,
-        out_dir=out_dir,
-    )
-    return h
-
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
-
-def _build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        description="Design a complex lowpass FIR via the complex Remez algorithm.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    p.add_argument("--N", type=int, default=63, help="Number of filter taps")
-    p.add_argument("--fs", type=float, default=750.0, help="Sample rate in MHz")
-    p.add_argument(
-        "--f-pass",
-        type=float,
-        default=162.5,  # 162.5
-        help="Passband half-bandwidth in MHz",
-    )
-    p.add_argument(
-        "--f-stop",
-        type=float,
-        default=210.0,
-        help="Stopband start frequency in MHz",
-    )
-    p.add_argument(
-        "--tb-gap",
-        type=float,
-        default=20.0,
-        help="Gap between passband edge and TB constraint start (MHz)",
-    )
-    p.add_argument(
-        "--delta-p",
-        type=float,
-        default=0.05,
-        help="Passband ripple tolerance (sets sb_weight = delta_p/delta_s)",
-    )
-    p.add_argument(
-        "--delta-s",
-        type=float,
-        default=0.1,
-        help="Stopband attenuation tolerance",
-    )
-    p.add_argument("--n-iter", type=int, default=150, help="Maximum Lawson iterations")
-    p.add_argument(
-        "--n-grid", type=int, default=512, help="Frequency grid points per band"
-    )
-    p.add_argument(
-        "--out-dir",
-        type=str,
-        default=os.path.join(_HERE, "figure", "eqz_lowpass_remez"),
-        help="Output directory",
-    )
-    p.add_argument(
-        "--verbose", action="store_true", help="Print per-iteration Lawson diagnostics"
-    )
-    p.add_argument(
-        "--no-transition-band",
-        action="store_true",
-        # action="store_false",
-        help="Disable transition band constraints; solver uses only passband and stopband",
-    )
-    p.add_argument(
-        "--eqz-resp-path",
-        type=str,
-        # default=None,
-        default="trx_board_meas/freq_resp/rx_ch1_h3.npy",
-        help="Path to a .npy freq response file (shape (2,N) complex128) to use as eqz_resp "
-             "instead of the default UCDC model. E.g. trx_board_meas/freq_resp/rx_ch1_h3.npy",
-    )
-    return p
-
-
-if __name__ == "__main__":
-    args = _build_parser().parse_args()
-    design_eqz_lowpass_remez(
-        N=args.N,
-        fs_mhz=args.fs,
-        f_pass_mhz=args.f_pass,
-        f_stop_mhz=args.f_stop,
-        tb_gap_mhz=args.tb_gap,
-        delta_p=args.delta_p,
-        delta_s=args.delta_s,
-        n_iter=args.n_iter,
-        n_grid=args.n_grid,
-        out_dir=args.out_dir,
-        verbose=args.verbose,
-        eqz_resp_path=args.eqz_resp_path,
-        use_transition_band=not args.no_transition_band,
-    )
+    if save:
+        _save_and_plot(
+            h=h,
+            pb_freqs=pb_freqs,
+            tb_freqs=tb_freqs,
+            Hd_pb=Hd_pb,
+            tb_desired=tb_desired,
+            f_pass_mhz=cfg.f_pass_mhz,
+            f_stop_mhz=cfg.f_stop_mhz,
+            fs_mhz=cfg.fs_mhz,
+            pb_norm=pb_norm,
+            N=cfg.N,
+            delta_p=cfg.delta_p,
+            delta_s=cfg.delta_s,
+            out_dir=cfg.out_dir,
+        )
+    return h, metrics

@@ -226,9 +226,6 @@ def design_eqz_lowpass(
     # ------------------------------------------------------------------ #
     # Step 6: save and plot                                               #
     # ------------------------------------------------------------------ #
-    _, _, H_combined, hc_freq_axis = compute_aaf_responses(f_pass_mhz=f_pass_mhz, fs_mhz=fs_mhz)
-    H_combined = H_combined / H_combined[len(H_combined) // 2]  # DC-normalise for comparison
-
     save_coefficients(h, out_dir=out_dir, name='eqz_lowpass')
     plot_response(
         h, fs=fs_mhz, out_dir=out_dir,
@@ -237,8 +234,6 @@ def design_eqz_lowpass(
         freq_unit='MHz',
         Hd_freqs_rad=pb_freqs,
         Hd=Hd_pb,
-        Hc_freqs_mhz=hc_freq_axis,
-        Hc=H_combined,
     )
     _write_params_tex(
         path=os.path.join(_HERE, 'document', 'params.tex'),

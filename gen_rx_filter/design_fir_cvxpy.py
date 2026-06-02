@@ -209,19 +209,23 @@ def interp_fft_response(
         Complex interpolated response, shape (K,).
     """
     n_fft = len(fft_resp)
-    # Angular frequency of each FFT bin, mapped to (-π, π]
-    bin_freqs_rad = 2 * np.pi * np.fft.fftfreq(n_fft)   # uses d=1 (normalised)
+    bin_freqs_rad = 2 * np.pi * np.fft.fftfreq(n_fft)
 
-    # Sort bins by frequency so interp1d gets a monotone x-axis
     order = np.argsort(bin_freqs_rad)
     sorted_freqs = bin_freqs_rad[order]
-    sorted_resp  = fft_resp[order]
+    sorted_mag   = np.abs(fft_resp[order])
+    sorted_phase = np.unwrap(np.angle(fft_resp[order]))
 
-    interp_re = interp1d(sorted_freqs, sorted_resp.real, kind='linear',
-                         bounds_error=False, fill_value=0.0)
-    interp_im = interp1d(sorted_freqs, sorted_resp.imag, kind='linear',
-                         bounds_error=False, fill_value=0.0)
-    return interp_re(target_freqs_rad) + 1j * interp_im(target_freqs_rad)
+    # Interpolate magnitude and unwrapped phase separately.
+    # Interpolating real/imag directly is inaccurate when phase rotates fast
+    # between bins (e.g. a linear-phase trend), producing wrong magnitudes.
+    interp_mag   = interp1d(sorted_freqs, sorted_mag,   kind='linear',
+                            bounds_error=False,
+                            fill_value=(sorted_mag[0],   sorted_mag[-1]))
+    interp_phase = interp1d(sorted_freqs, sorted_phase, kind='linear',
+                            bounds_error=False,
+                            fill_value=(sorted_phase[0], sorted_phase[-1]))
+    return interp_mag(target_freqs_rad) * np.exp(1j * interp_phase(target_freqs_rad))
 
 
 # ---------------------------------------------------------------------------
@@ -238,8 +242,6 @@ def plot_response(
     freq_unit: str = 'Hz',
     Hd_freqs_rad: Optional[np.ndarray] = None,
     Hd: Optional[np.ndarray] = None,
-    Hc_freqs_mhz: Optional[np.ndarray] = None,
-    Hc: Optional[np.ndarray] = None,
     h_label: str = 'cvx. opt.',
 ) -> None:
     """Plot magnitude (dB) and phase responses and save to PNG and interactive HTML.
@@ -281,19 +283,12 @@ def plot_response(
         hd_mag_db     = 20 * np.log10(np.abs(Hd) + 1e-12)
         hd_phase_deg  = np.degrees(np.unwrap(np.angle(Hd)))
 
-    hc_mag_db = hc_phase_deg = None
-    if Hc_freqs_mhz is not None and Hc is not None:
-        hc_mag_db    = 20 * np.log10(np.abs(Hc) + 1e-12)
-        hc_phase_deg = np.degrees(np.unwrap(np.angle(Hc)))
-
     # --- matplotlib PNG (magnitude only) ---
     FSIZE = 20
     fig, ax = plt.subplots(figsize=(12, 5))
 
     if hd_freq_axis is not None:
         ax.plot(hd_freq_axis, hd_mag_db, lw=2.0, label='desired resp.', zorder=2)
-    if hc_mag_db is not None:
-        ax.plot(Hc_freqs_mhz, hc_mag_db, lw=2.0, label='direct comb.', zorder=3)
     ax.plot(w, mag_db, lw=1.5, label=h_label, zorder=4)
     ax.set_ylabel('Magnitude (dB)', fontsize=FSIZE)
     ax.set_xlabel(f'Frequency ({freq_unit})', fontsize=FSIZE)
@@ -319,13 +314,11 @@ def plot_response(
         fig2, ax2 = plt.subplots(figsize=(12, 5))
         if hd_freq_axis is not None:
             ax2.plot(hd_freq_axis, hd_mag_db, lw=2.0, label='desired resp.', zorder=2)
-        if hc_mag_db is not None:
-            ax2.plot(Hc_freqs_mhz, hc_mag_db, lw=2.0, label='direct comb.', zorder=3)
         ax2.plot(w, mag_db, lw=1.5, label=h_label, zorder=4)
         for lo, hi in [(-pb_hi * fs, -pb_lo * fs), (pb_lo * fs, pb_hi * fs)]:
             ax2.axvspan(lo, hi, alpha=0.10, color='green')
         ax2.set_xlim(x_lo, x_hi)
-        ax2.set_ylim(-0.9, 0.1)
+        ax2.set_ylim(-2.0, 2.0)
         ax2.set_ylabel('Magnitude (dB)', fontsize=FSIZE)
         ax2.set_xlabel(f'Frequency ({freq_unit})', fontsize=FSIZE)
         ax2.tick_params(labelsize=FSIZE)
@@ -348,14 +341,6 @@ def plot_response(
                        row=1, col=1)
         pfig.add_trace(go.Scatter(x=hd_freq_axis.tolist(), y=hd_phase_deg.tolist(),
                                   name='desired resp.', line=dict(width=2.0),
-                                  showlegend=False),
-                       row=2, col=1)
-    if hc_mag_db is not None:
-        pfig.add_trace(go.Scatter(x=Hc_freqs_mhz.tolist(), y=hc_mag_db.tolist(),
-                                  name='direct comb.', line=dict(width=2.0)),
-                       row=1, col=1)
-        pfig.add_trace(go.Scatter(x=Hc_freqs_mhz.tolist(), y=hc_phase_deg.tolist(),
-                                  name='direct comb.', line=dict(width=2.0),
                                   showlegend=False),
                        row=2, col=1)
     pfig.add_trace(go.Scatter(x=w.tolist(), y=mag_db.tolist(),
