@@ -7,89 +7,13 @@
 \usepackage{geometry}
 \geometry{margin=2.5cm}
 
-\title{Equalizer Lowpass FIR Filter Design via Convex Optimisation}
+\title{Equalizer Lowpass FIR Filter Design via Complex Remez Algorithm}
 \author{}
 \date{}
 
 \begin{document}
 
 \maketitle
-
-\section{Overview}
-
-A complex-valued lowpass FIR filter is designed whose passband target matches
-the UCDC equalizer frequency response.  The filter is found by solving a
-second-order cone programme (SOCP) using CVXPY.
-
-\subsection*{Signal chain parameters}
-
-\input{params}
-
-\section{Optimisation Formulation}
-
-The DTFT of the complex tap vector $\mathbf{h} \in \mathbf{C}^N$ is
-\[
-  H(\omega) = \sum_{n=0}^{N-1} h[n]\, e^{-j\omega n}
-  = \mathbf{a}(\omega)^\top \mathbf{h},
-  \quad
-  \mathbf{a}(\omega) = \bigl[1,\, e^{-j\omega},\, \ldots,\, e^{-j\omega(N-1)}\bigr]^\top.
-\]
-
-Sampling over a frequency grid turns this into the linear map
-$\mathbf{H} = \mathbf{A}\mathbf{h}$, where
-$A_{kn} = e^{-j\omega_k n}$.
-
-Let $\mathcal{P}$, $\mathcal{S}$, and $\mathcal{T}$ denote the index sets of
-the passband, stopband, and transition-band frequency grid points,
-respectively.
-The \textbf{fixed-tolerance} problem is
-\begin{align}
-  \underset{\mathbf{h}}{\text{minimise}} \quad
-    & \sum_{k\in\mathcal{P}} \lvert \mathbf{a}(\omega_k)^\top \mathbf{h} - H_d(\omega_k) \rvert
-      + \lambda \lVert \mathbf{h} \rVert^2 \notag \\
-  \text{subject to} \quad
-    & \lvert \mathbf{a}(\omega_k)^\top \mathbf{h} - H_d(\omega_k) \rvert \leq \delta_p,
-      \quad k \in \mathcal{P} \notag \\
-    & \lvert \mathbf{a}(\omega_k)^\top \mathbf{h} \rvert \leq \delta_s,
-      \quad k \in \mathcal{S} \notag \\
-    & \lvert \mathbf{a}(\omega_k)^\top \mathbf{h} \rvert \leq \delta_{t,k},
-      \quad k \in \mathcal{T}. \notag
-\end{align}
-
-The transition-band bound $\delta_{t,k}$ decreases linearly from
-$\max_{k\in\mathcal{P}}|H_d(\omega_k)|$ at the passband edge to
-$3\delta_s$ at the stopband edge, preventing large overshoot in the
-unconstrained gap while keeping the SOCP feasible.
-
-\section{Filter Response}
-
-Figure~\ref{fig:filter_response} shows the designed filter's magnitude
-(dB) and phase response overlaid with the desired equalizer response
-$H_d(\omega)$.
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=\linewidth]{../figure/eqz_lowpass/filter_response.png}
-  \caption{Magnitude (top) and phase (bottom) of the designed equalizer
-           lowpass FIR filter.  The green shaded regions indicate the
-           passband $\pm162.5$\,MHz.  The dashed red line is the desired
-           response $H_d(\omega)$ interpolated from the 256-bin UCDC
-           equalizer FFT.}
-  \label{fig:filter_response}
-\end{figure}
-
-Figure~\ref{fig:filter_response_inband} shows the in-band magnitude response
-zoomed to $\pm5$\,MHz beyond the passband edges, with the y-axis limited to
-$[-0.9, +0.1]$\,dB to resolve the passband ripple.
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=\linewidth]{../figure/eqz_lowpass/filter_response_inband.png}
-  \caption{In-band magnitude response zoomed to
-           $[\!-167.5, +167.5]$\,MHz with a $[-0.9, +0.1]$\,dB y-axis.
-           The green shaded regions indicate the passband $\pm162.5$\,MHz.}
-  \label{fig:filter_response_inband}
-\end{figure}
 
 \section{Complex Remez Algorithm}
 
@@ -108,45 +32,10 @@ $\ell$.  This reweighting progressively concentrates the design effort on
 the worst-case frequency points, driving the solution toward the
 minimax (Chebyshev) optimum.
 
-Unlike the convex optimisation approach, no explicit passband or stopband
-tolerance parameters are required; the algorithm converges to the
-equi-ripple solution determined solely by the frequency grid and the
-desired response $H_d(\omega)$.
+No explicit passband or stopband tolerance parameters are required; the
+algorithm converges to the equi-ripple solution determined solely by the
+frequency grid and the desired response $H_d(\omega)$.
 
-Figure~\ref{fig:complex_remez_response} shows the full-band magnitude and
-phase response of the filter designed with the complex Remez algorithm.
-Figure~\ref{fig:complex_remez_inband} zooms into the passband region, and
-Figure~\ref{fig:complex_remez_error} shows the in-band approximation error.
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=\linewidth]{../figure/complex_remez_result/no_tb_constraint/filter_response.png}
-  \caption{Full-band magnitude (top) and phase (bottom) of the complex
-           Remez FIR filter.  The green shaded region indicates the
-           passband $\pm162.5$\,MHz.  The dashed red line is the desired
-           response $H_d(\omega)$.}
-  \label{fig:complex_remez_response}
-\end{figure}
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=\linewidth]{../figure/complex_remez_result/no_tb_constraint/filter_response_inband.png}
-  \caption{In-band magnitude response of the complex Remez filter zoomed
-           to the passband region.  The green shaded region indicates the
-           passband $\pm162.5$\,MHz.}
-  \label{fig:complex_remez_inband}
-\end{figure}
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=\linewidth]{../figure/complex_remez_result/no_tb_constraint/inband_error.png}
-  \caption{In-band approximation error of the complex Remez filter.
-           The equi-ripple characteristic of the Chebyshev solution is
-           visible across the passband.}
-  \label{fig:complex_remez_error}
-\end{figure}
-
-\newpage
 \subsection{Cosine Transition-Band Constraint}
 
 Without a transition-band constraint the IRLS solver leaves the gap between
@@ -173,36 +62,59 @@ IRLS cost with the same band weight as the stopband ($B_k = w_{\mathrm{sb}}$),
 so the solver tracks the ramp target directly rather than simply suppressing
 energy toward zero.
 
-Figures~\ref{fig:cosine_tb_response}--\ref{fig:cosine_tb_error} show the
-filter designed with this cosine transition-band constraint.
+\newpage
+\section{Simulation}
+
+Figure~\ref{fig:rx_srx} shows the measured magnitude and phase response of
+the RX and Switched RX (SRX) paths, captured with a network analyser.
+Figure~\ref{fig:ch_eqz} overlays the channel response and its inverse
+equalizer response, both DC-normalised.  The equalizer compensates for the
+channel magnitude roll-off across the passband.
+Figure~\ref{fig:eqz_final} shows the desired equalizer response $H_d(\omega)$
+after adding a linear-phase trend, which shifts the target to a causal FIR
+training target.
+Figures~\ref{fig:filter_response} and~\ref{fig:filter_response_inband} show
+the trained FIR filter response.  The filter is designed by the complex Remez
+algorithm to match the desired equalizer response $H_d(\omega)$.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=\linewidth]{../figure/complex_remez_result/cosine_tb_constraint/filter_response.png}
-  \caption{Full-band magnitude and phase of the complex Remez filter with
-           cosine transition-band constraint.  Compared with the
-           unconstrained design (Figure~\ref{fig:complex_remez_response}),
-           the transition region rolls off more smoothly between
-           $\pm162.5$\,MHz and $\pm250$\,MHz.}
-  \label{fig:cosine_tb_response}
+  \includegraphics[width=\linewidth]{../figure/complex_remez_result/rx_srx.png}
+  \caption{Measured RX and Switched RX (SRX) frequency responses from the
+           network analyser.  Top: magnitude (dB).  Bottom: unwrapped phase (deg).}
+  \label{fig:rx_srx}
 \end{figure}
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=\linewidth]{../figure/complex_remez_result/cosine_tb_constraint/filter_response_inband.png}
-  \caption{In-band magnitude response of the cosine-constrained Remez
-           filter zoomed to the passband region.}
-  \label{fig:cosine_tb_inband}
+  \includegraphics[width=\linewidth]{../figure/complex_remez_result/rx_ch1_h3_ch_eqz.png}
+  \caption{Channel and equalizer frequency responses overlaid.
+           Top: magnitude (dB).  Bottom: phase (deg).}
+  \label{fig:ch_eqz}
 \end{figure}
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=\linewidth]{../figure/complex_remez_result/cosine_tb_constraint/inband_error.png}
-  \caption{In-band approximation error of the cosine-constrained Remez
-           filter.  The additional transition-band degrees of freedom
-           redistribute the equi-ripple error across the passband relative
-           to the unconstrained result.}
-  \label{fig:cosine_tb_error}
+  \includegraphics[width=\linewidth]{../figure/complex_remez_result/rx_ch1_h3_eqz_final.png}
+  \caption{Desired equalizer frequency response $H_d(\omega)$ with linear-phase
+           trend applied.  Top: magnitude (dB).  Bottom: phase (deg).}
+  \label{fig:eqz_final}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{../figure/complex_remez_result/filter_response.png}
+  \caption{Full-band magnitude (top) and phase (bottom) of the trained
+           equalizer FIR filter.}
+  \label{fig:filter_response}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{../figure/complex_remez_result/filter_response_inband.png}
+  \caption{In-band magnitude response of the trained equalizer FIR filter,
+           zoomed to the passband region.}
+  \label{fig:filter_response_inband}
 \end{figure}
 
 \end{document}

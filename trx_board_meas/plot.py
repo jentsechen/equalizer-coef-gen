@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import plotly.express as px
 import plotly.graph_objs as go
@@ -18,59 +19,55 @@ def _group(stem: str):
 def _plot(files: list, out_name: str):
     _FIGURE_DIR.mkdir(exist_ok=True)
 
-    fig = make_subplots(
-        rows=2,
-        cols=1,
-        vertical_spacing=0.08,
-    )
+    fig = make_subplots(rows=2, cols=1, vertical_spacing=0.08)
+    traces = []
 
     for i, path in enumerate(files):
         color = _COLORS[i % len(_COLORS)]
         group = _group(path.stem)
         freq, gain, phase = _load_decimated(path)
+        traces.append((path.stem, freq, gain, phase))
 
         fig.add_trace(
-            go.Scatter(
-                x=freq,
-                y=gain,
-                name=path.stem,
-                legendgroup=group,
-                line=dict(color=color),
-            ),
-            row=1,
-            col=1,
+            go.Scatter(x=freq, y=gain, name=path.stem, legendgroup=group, line=dict(color=color)),
+            row=1, col=1,
         )
         fig.add_trace(
-            go.Scatter(
-                x=freq,
-                y=phase,
-                name=path.stem,
-                legendgroup=group,
-                showlegend=False,
-                line=dict(color=color),
-            ),
-            row=2,
-            col=1,
+            go.Scatter(x=freq, y=phase, name=path.stem, legendgroup=group, showlegend=False, line=dict(color=color)),
+            row=2, col=1,
         )
 
     for x_val in (9.65 - 0.325, 9.65 + 0.325):
         for row in (1, 2):
-            fig.add_vline(
-                x=x_val, line=dict(dash="dash", color="gray", width=1), row=row, col=1
-            )
+            fig.add_vline(x=x_val, line=dict(dash="dash", color="gray", width=1), row=row, col=1)
 
     fig.update_xaxes(title_text="Frequency (GHz)")
     fig.update_yaxes(title_text="Gain (dB)", row=1, col=1)
     fig.update_yaxes(title_text="Unwrapped Phase (deg)", row=2, col=1)
-    fig.update_layout(
-        font=dict(size=20),
-        margin=dict(l=80, r=20, t=60, b=60),
-        legend=dict(groupclick="toggleitem"),
-    )
+    fig.update_layout(font=dict(size=20), margin=dict(l=80, r=20, t=60, b=60), legend=dict(groupclick="toggleitem"))
 
     out = _FIGURE_DIR / out_name
     fig.write_html(out)
     print(f"saved → {out}")
+
+    fig_mpl, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), tight_layout=True)
+    for stem, freq, gain, phase in traces:
+        ax1.plot(freq, gain, label=stem)
+        ax2.plot(freq, phase)
+    for x_val in (9.65 - 0.325, 9.65 + 0.325):
+        ax1.axvline(x_val, linestyle="--", color="gray", linewidth=1)
+        ax2.axvline(x_val, linestyle="--", color="gray", linewidth=1)
+    ax1.set_xlabel("Frequency (GHz)")
+    ax1.set_ylabel("Gain (dB)")
+    ax2.set_xlabel("Frequency (GHz)")
+    ax2.set_ylabel("Unwrapped Phase (deg)")
+    ax1.grid(True)
+    ax2.grid(True)
+    ax1.legend(fontsize=8)
+    png_out = out.with_suffix(".png")
+    fig_mpl.savefig(png_out, dpi=150)
+    plt.close(fig_mpl)
+    print(f"saved → {png_out}")
 
 
 def plot_freq_resp(path=None, stem: str = None, out_name: str = None):
@@ -120,6 +117,20 @@ def plot_freq_resp(path=None, stem: str = None, out_name: str = None):
     out = _FIGURE_DIR / (out_name or f"{path.stem}_freq_resp.html")
     fig.write_html(out)
     print(f"saved → {out}")
+
+    fig_mpl, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), tight_layout=True)
+    ax1.plot(freq, magnitude_db)
+    ax2.plot(freq, phase_deg)
+    ax1.set_xlabel("Frequency (GHz)")
+    ax1.set_ylabel("Magnitude (dB)")
+    ax2.set_xlabel("Frequency (GHz)")
+    ax2.set_ylabel("Phase (deg)")
+    ax1.grid(True)
+    ax2.grid(True)
+    png_out = out.with_suffix(".png")
+    fig_mpl.savefig(png_out, dpi=150)
+    plt.close(fig_mpl)
+    print(f"saved → {png_out}")
 
 
 def plot_tx_stx():

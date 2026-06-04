@@ -16,6 +16,7 @@ Run from the repository root:
 import os
 import sys
 
+import matplotlib.pyplot as plt
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -65,6 +66,25 @@ def _save_overlay_fig(resps: list, freq_mhz: np.ndarray, out_path: str):
     fig.write_html(out_path)
     print(f"saved → {out_path}")
 
+    fig_mpl, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), tight_layout=True)
+    for resp, name in resps:
+        shifted = np.fft.fftshift(resp)
+        mag_db = 20 * np.log10(np.maximum(np.abs(shifted), 1e-12))
+        phase_deg = np.degrees(np.unwrap(np.angle(shifted)))
+        ax1.plot(freq_mhz, mag_db, label=name)
+        ax2.plot(freq_mhz, phase_deg)
+    ax1.set_xlabel("Frequency (MHz)")
+    ax1.set_ylabel("Magnitude (dB)")
+    ax2.set_xlabel("Frequency (MHz)")
+    ax2.set_ylabel("Phase (deg)")
+    ax1.grid(True)
+    ax2.grid(True)
+    ax1.legend()
+    png_path = os.path.splitext(out_path)[0] + ".png"
+    fig_mpl.savefig(png_path, dpi=150)
+    plt.close(fig_mpl)
+    print(f"saved → {png_path}")
+
 
 def _save_fig(resp_fft: np.ndarray, freq_mhz: np.ndarray, name: str, out_path: str):
     fig = make_subplots(rows=2, cols=1, vertical_spacing=0.08)
@@ -74,6 +94,23 @@ def _save_fig(resp_fft: np.ndarray, freq_mhz: np.ndarray, name: str, out_path: s
     _apply_layout(fig)
     fig.write_html(out_path)
     print(f"saved → {out_path}")
+
+    shifted = np.fft.fftshift(resp_fft)
+    mag_db = 20 * np.log10(np.maximum(np.abs(shifted), 1e-12))
+    phase_deg = np.degrees(np.unwrap(np.angle(shifted)))
+    fig_mpl, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), tight_layout=True)
+    ax1.plot(freq_mhz, mag_db)
+    ax2.plot(freq_mhz, phase_deg)
+    ax1.set_xlabel("Frequency (MHz)")
+    ax1.set_ylabel("Magnitude (dB)")
+    ax2.set_xlabel("Frequency (MHz)")
+    ax2.set_ylabel("Phase (deg)")
+    ax1.grid(True)
+    ax2.grid(True)
+    png_path = os.path.splitext(out_path)[0] + ".png"
+    fig_mpl.savefig(png_path, dpi=150)
+    plt.close(fig_mpl)
+    print(f"saved → {png_path}")
 
 
 # ---------------------------------------------------------------------------
